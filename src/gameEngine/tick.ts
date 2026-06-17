@@ -3,7 +3,7 @@ import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
   RETURN_SPEED, GOAL_PAUSE_DURATION, BALL_RADIUS,
-  BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_OFFSET,
+  BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
 } from './constants.js';
@@ -130,14 +130,15 @@ export function tickGame(state: OnlineGameState, dt: number): void {
 
         movePlayerByInput(p, input, dt);
 
-        // Ball control: soft trap when close, not kicking
+        // Ball control: strong when player holds direction, gentle otherwise
         if (!input.kick) {
           const bcDist = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (bcDist < BALL_CONTROL_RADIUS) {
             state.ball.vx *= BALL_CONTROL_DAMPING;
             state.ball.vy *= BALL_CONTROL_DAMPING;
+            const hasInput = input.left || input.right || input.up || input.down;
             let tdx = 0, tdy = 0;
-            if (input.left || input.right || input.up || input.down) {
+            if (hasInput) {
               if (input.right) tdx += 1;
               if (input.left) tdx -= 1;
               if (input.down) tdy += 1;
@@ -151,9 +152,10 @@ export function tickGame(state: OnlineGameState, dt: number): void {
             const fx = targetX - state.ball.x;
             const fy = targetY - state.ball.y;
             const fLen = Math.sqrt(fx * fx + fy * fy);
-            if (fLen > 1) {
-              state.ball.vx += (fx / fLen) * BALL_CONTROL_FORCE * dt;
-              state.ball.vy += (fy / fLen) * BALL_CONTROL_FORCE * dt;
+            if (fLen > 4) {
+              const force = hasInput ? BALL_CONTROL_INPUT_FORCE : BALL_CONTROL_FORCE;
+              state.ball.vx += (fx / fLen) * force * dt;
+              state.ball.vy += (fy / fLen) * force * dt;
             }
           }
         }

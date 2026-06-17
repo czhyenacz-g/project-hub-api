@@ -23,9 +23,10 @@ export const GOAL_PAUSE_DURATION = 2.5;
 
 // Ball control (soft trap for active player)
 export const BALL_CONTROL_RADIUS = 44;
-export const BALL_CONTROL_DAMPING = 0.90;
-export const BALL_CONTROL_FORCE = 110;
-export const BALL_CONTROL_OFFSET = 26;
+export const BALL_CONTROL_DAMPING = 0.86;
+export const BALL_CONTROL_FORCE = 130;
+export const BALL_CONTROL_INPUT_FORCE = 210;
+export const BALL_CONTROL_OFFSET = 34;
 
 // Corner clear
 export const CORNER_ZONE_MARGIN = 72;
