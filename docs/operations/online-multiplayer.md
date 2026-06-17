@@ -35,5 +35,15 @@ MVP — bez client prediction, rollbacku ani bufferu.
 - `error` `{ message }`
 
 ## Výsledky
-Online výsledky se zatím neukládají do DB.
-Další krok: WebSocket reconnect, uložení výsledku přes match-results API.
+
+Po konci zápasu se asynchronně uloží:
+- `OsmaOnlineMatch` — záznam zápasu (skóre, týmy, délka, kód lobby)
+- `OsmaOnlineMatchEvent[]` — event log: `match_started`, `goal` (per gól), `match_finished`
+- `OsmaMatchResult` — veřejný výsledek pro homepage s `mode='multiplayer'`
+
+### Detekce gólů
+V game loopu se před každým `tickGame()` uloží skóre, po tiku se porovná rozdíl.
+
+### Veřejné endpointy (bez auth)
+- `GET /api/osma-liga/online-matches?limit=20` — seznam dokončených zápasů
+- `GET /api/osma-liga/online-matches/:id` — detail zápasu s event logem
