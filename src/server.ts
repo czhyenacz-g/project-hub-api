@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { db } from './db.js';
 import { osmaLigaRoutes } from './modules/osmaLiga/routes.js';
 import { onlineRoutes } from './modules/osmaLiga/onlineRoutes.js';
+import { attachSocketIO } from './ws/onlineGameSocket.js';
 
 const app = Fastify({ logger: true });
 
@@ -22,6 +23,9 @@ async function main(): Promise<void> {
   await app.register(onlineRoutes);
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
+
+  // Attach Socket.IO after listen so app.server is available
+  attachSocketIO(app.server);
 }
 
 main().catch(async (err) => {

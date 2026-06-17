@@ -16,15 +16,16 @@
     "@fastify/cors": "^10.0.2",
     "@prisma/client": "^6.0.0",
     "fastify": "^5.2.1",
+    "socket.io": "^4.8.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "prisma": "^6.0.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0"
+    "typescript": "^5.7.2"
   }
 }
