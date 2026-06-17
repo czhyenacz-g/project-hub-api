@@ -79,6 +79,7 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
         durationSeconds,
         matchComment: getMultiplayerComment(score.home, score.away),
         playedAt: finishedAt,
+        onlineMatchId: onlineMatch.id,
       },
     });
 
@@ -120,7 +121,7 @@ export async function getOnlineMatchById(id: string) {
     where: { id },
     include: {
       events: {
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ matchSecond: 'asc' }, { createdAt: 'asc' }],
       },
     },
   });

@@ -20,6 +20,7 @@ model OsmaMatchResult {
   matchComment    String
   playedAt        DateTime
   createdAt       DateTime @default(now())
+  onlineMatchId   String?
 
   @@index([playedAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
