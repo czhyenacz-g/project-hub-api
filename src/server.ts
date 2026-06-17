@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import { config } from './config.js';
 import { db } from './db.js';
 import { osmaLigaRoutes } from './modules/osmaLiga/routes.js';
+import { onlineRoutes } from './modules/osmaLiga/onlineRoutes.js';
 
 const app = Fastify({ logger: true });
 
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
   }));
 
   await app.register(osmaLigaRoutes);
+  await app.register(onlineRoutes);
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
 }
