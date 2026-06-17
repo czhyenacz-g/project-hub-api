@@ -1,8 +1,22 @@
 import { OnlineGameState, InputState } from '../../gameEngine/types.js';
 import { createInitialState } from '../../gameEngine/createInitialState.js';
 import { tickGame } from '../../gameEngine/tick.js';
+import { MATCH_DURATION } from '../../gameEngine/constants.js';
+import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 
 export const ONLINE_GAME_TTL_MINUTES = 30;
+
+export type OnlineMatchEventDraft = {
+  type: string;
+  matchSecond?: number;
+  teamSide?: 'home' | 'away';
+  teamName?: string;
+  actorLabel?: string;
+  homeScoreAfter?: number;
+  awayScoreAfter?: number;
+  message?: string;
+  metadataJson?: Record<string, unknown>;
+};
 
 export type OnlineGameRoom = {
   code: string;
@@ -14,6 +28,10 @@ export type OnlineGameRoom = {
   expiresAt: string;
   gameState: OnlineGameState | null;
   gameInterval: ReturnType<typeof setInterval> | null;
+  events: OnlineMatchEventDraft[];
+  startedAt: Date | null;
+  resultSavedAt: Date | null;
+  onlineMatchId: string | null;
 };
 
 const store = new Map<string, OnlineGameRoom>();
@@ -62,6 +80,10 @@ export function createGame(): OnlineGameRoom {
     expiresAt: expiresAt.toISOString(),
     gameState: null,
     gameInterval: null,
+    events: [],
+    startedAt: null,
+    resultSavedAt: null,
+    onlineMatchId: null,
   };
   store.set(room.code, room);
   return room;
@@ -84,12 +106,12 @@ export function joinGame(code: string): { room: OnlineGameRoom; guestToken: stri
   return { room, guestToken };
 }
 
-export function listGames(limit: number): Omit<OnlineGameRoom, 'hostToken' | 'guestToken' | 'gameState' | 'gameInterval'>[] {
+export function listGames(limit: number): Omit<OnlineGameRoom, 'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' | 'startedAt' | 'resultSavedAt' | 'onlineMatchId'>[] {
   cleanupExpired();
-  const games: Omit<OnlineGameRoom, 'hostToken' | 'guestToken' | 'gameState' | 'gameInterval'>[] = [];
+  const games: Omit<OnlineGameRoom, 'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' | 'startedAt' | 'resultSavedAt' | 'onlineMatchId'>[] = [];
   for (const room of store.values()) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { hostToken, guestToken, gameState, gameInterval, ...safe } = room;
+    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, onlineMatchId, ...safe } = room;
     games.push(safe);
     if (games.length >= limit) break;
   }
@@ -106,6 +128,14 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   const state = createInitialState();
   state.status = 'playing';
   room.gameState = state;
+  room.startedAt = new Date();
+  room.events.push({
+    type: 'match_started',
+    matchSecond: 0,
+    homeScoreAfter: 0,
+    awayScoreAfter: 0,
+    message: 'Zápas začal.',
+  });
 
   const TICK_MS = 33;              // ~30 ticks/s
   const DT = TICK_MS / 1000;       // 0.033 s per tick
@@ -116,8 +146,36 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   room.gameInterval = setInterval(() => {
     if (!room.gameState) return;
 
+    const prevHome = room.gameState.score.home;
+    const prevAway = room.gameState.score.away;
+
     tickGame(room.gameState, DT);
     ticksSinceSnapshot++;
+
+    // Detect goals by score diff
+    if (room.gameState.score.home > prevHome) {
+      const matchSecond = Math.round(MATCH_DURATION - room.gameState.timeLeftSeconds);
+      room.events.push({
+        type: 'goal',
+        matchSecond,
+        teamSide: 'home',
+        teamName: 'Náhoda FC',
+        homeScoreAfter: room.gameState.score.home,
+        awayScoreAfter: room.gameState.score.away,
+        message: `Gól domácích! ${room.gameState.score.home}:${room.gameState.score.away}`,
+      });
+    } else if (room.gameState.score.away > prevAway) {
+      const matchSecond = Math.round(MATCH_DURATION - room.gameState.timeLeftSeconds);
+      room.events.push({
+        type: 'goal',
+        matchSecond,
+        teamSide: 'away',
+        teamName: 'FK Pařezov',
+        homeScoreAfter: room.gameState.score.home,
+        awayScoreAfter: room.gameState.score.away,
+        message: `Gól hostů! ${room.gameState.score.home}:${room.gameState.score.away}`,
+      });
+    }
 
     if (ticksSinceSnapshot >= TICKS_PER_SNAPSHOT) {
       ticksSinceSnapshot = 0;
@@ -125,9 +183,19 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
     }
 
     if (room.gameState.status === 'finished') {
+      room.events.push({
+        type: 'match_finished',
+        matchSecond: MATCH_DURATION,
+        homeScoreAfter: room.gameState.score.home,
+        awayScoreAfter: room.gameState.score.away,
+        message: 'Konec zápasu.',
+      });
       clearInterval(room.gameInterval!);
       room.gameInterval = null;
       emitFn('game_finished', { score: room.gameState.score });
+      void saveOnlineMatchResult(room).catch((e: unknown) => {
+        console.error('[onlineGames] Failed to save online match result:', e);
+      });
     }
   }, TICK_MS);
 

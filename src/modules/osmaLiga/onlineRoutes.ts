@@ -3,6 +3,7 @@ import { apiKeyAuth } from '../../shared/apiKeyAuth.js';
 import { sendError } from '../../shared/errors.js';
 import { ListOnlineGamesQuerySchema } from './onlineGameValidation.js';
 import { createGame, getGame, joinGame, listGames } from './onlineGames.js';
+import { listOnlineMatches, getOnlineMatchById } from './onlineMatchResultService.js';
 
 export async function onlineRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/osma-liga/online-games — create game
@@ -92,4 +93,22 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
       });
     },
   );
+
+  // GET /api/osma-liga/online-matches — public list of finished online matches
+  app.get('/api/osma-liga/online-matches', async (request, reply) => {
+    const query = request.query as { limit?: string };
+    const limit = Math.min(parseInt(query.limit ?? '20', 10) || 20, 100);
+    const matches = await listOnlineMatches(limit);
+    return reply.send(matches);
+  });
+
+  // GET /api/osma-liga/online-matches/:id — public match detail with events
+  app.get('/api/osma-liga/online-matches/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const match = await getOnlineMatchById(id);
+    if (!match) {
+      return sendError(reply, 404, 'Online match not found');
+    }
+    return reply.send(match);
+  });
 }

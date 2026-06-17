@@ -24,3 +24,47 @@ model OsmaMatchResult {
   @@index([playedAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
 }
+
+model OsmaOnlineMatch {
+  id              String   @id @default(cuid())
+  gameCode        String   @unique
+  status          String   @default("finished")
+  homeTeamSlug    String
+  homeTeamName    String
+  awayTeamSlug    String
+  awayTeamName    String
+  homeScore       Int
+  awayScore       Int
+  winnerSide      String?
+  lobbyCreatedAt  DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  durationSeconds Int?
+  finishReason    String   @default("full_time")
+  publicResultId  String?
+  savedAt         DateTime @default(now())
+  events          OsmaOnlineMatchEvent[]
+
+  @@index([savedAt(sort: Desc)])
+  @@index([gameCode])
+}
+
+model OsmaOnlineMatchEvent {
+  id             String          @id @default(cuid())
+  onlineMatchId  String
+  onlineMatch    OsmaOnlineMatch @relation(fields: [onlineMatchId], references: [id], onDelete: Cascade)
+  gameCode       String
+  type           String
+  matchSecond    Int?
+  teamSide       String?
+  teamName       String?
+  actorLabel     String?
+  homeScoreAfter Int?
+  awayScoreAfter Int?
+  message        String?
+  metadataJson   Json?
+  createdAt      DateTime @default(now())
+
+  @@index([onlineMatchId])
+  @@index([gameCode])
+}
