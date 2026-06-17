@@ -1,8 +1,11 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
-  FIELD_CX, FIELD_CY,
+  FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
-  RETURN_SPEED, GOAL_PAUSE_DURATION,
+  RETURN_SPEED, GOAL_PAUSE_DURATION, BALL_RADIUS,
+  BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_OFFSET,
+  CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
+  CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
 } from './constants.js';
 import {
   dist, normalize,
@@ -40,6 +43,8 @@ function resetPositions(state: OnlineGameState): void {
   state.ball.vx = 0;
   state.ball.vy = 0;
   state.goalMessage = '';
+  state.cornerTimer = 0;
+  state.cornerClearCooldown = 0;
 }
 
 function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number): void {
@@ -125,6 +130,34 @@ export function tickGame(state: OnlineGameState, dt: number): void {
 
         movePlayerByInput(p, input, dt);
 
+        // Ball control: soft trap when close, not kicking
+        if (!input.kick) {
+          const bcDist = dist(p.x, p.y, state.ball.x, state.ball.y);
+          if (bcDist < BALL_CONTROL_RADIUS) {
+            state.ball.vx *= BALL_CONTROL_DAMPING;
+            state.ball.vy *= BALL_CONTROL_DAMPING;
+            let tdx = 0, tdy = 0;
+            if (input.left || input.right || input.up || input.down) {
+              if (input.right) tdx += 1;
+              if (input.left) tdx -= 1;
+              if (input.down) tdy += 1;
+              if (input.up) tdy -= 1;
+            } else {
+              tdx = team === 'home' ? 1 : -1;
+            }
+            const tNorm = normalize(tdx, tdy);
+            const targetX = p.x + tNorm.x * BALL_CONTROL_OFFSET;
+            const targetY = p.y + tNorm.y * BALL_CONTROL_OFFSET;
+            const fx = targetX - state.ball.x;
+            const fy = targetY - state.ball.y;
+            const fLen = Math.sqrt(fx * fx + fy * fy);
+            if (fLen > 1) {
+              state.ball.vx += (fx / fLen) * BALL_CONTROL_FORCE * dt;
+              state.ball.vy += (fy / fLen) * BALL_CONTROL_FORCE * dt;
+            }
+          }
+        }
+
         // 6. Kick
         if (input.kick && p.kickCooldown <= 0) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
@@ -163,6 +196,34 @@ export function tickGame(state: OnlineGameState, dt: number): void {
 
   // 8. Update ball physics
   updateBallPhysics(state.ball, dt);
+
+  // 8b. Corner clear: unstick ball stuck in corner
+  if (state.cornerClearCooldown > 0) {
+    state.cornerClearCooldown = Math.max(0, state.cornerClearCooldown - dt);
+  }
+  const nearLeft  = state.ball.x - FIELD_L < CORNER_ZONE_MARGIN;
+  const nearRight = FIELD_R - state.ball.x < CORNER_ZONE_MARGIN;
+  const nearTop   = state.ball.y - FIELD_T < CORNER_ZONE_MARGIN;
+  const nearBot   = FIELD_B - state.ball.y < CORNER_ZONE_MARGIN;
+  const inCorner  = (nearLeft || nearRight) && (nearTop || nearBot);
+  if (inCorner && state.cornerClearCooldown <= 0) {
+    state.cornerTimer += dt;
+    if (state.cornerTimer >= CORNER_CLEAR_DELAY) {
+      const cdx = FIELD_CX - state.ball.x;
+      const cdy = FIELD_CY - state.ball.y;
+      const cDir = normalize(cdx, cdy);
+      state.ball.x = Math.max(FIELD_L + BALL_RADIUS, Math.min(FIELD_R - BALL_RADIUS,
+        state.ball.x + cDir.x * CORNER_CLEAR_REPOSITION));
+      state.ball.y = Math.max(FIELD_T + BALL_RADIUS, Math.min(FIELD_B - BALL_RADIUS,
+        state.ball.y + cDir.y * CORNER_CLEAR_REPOSITION));
+      state.ball.vx = cDir.x * CORNER_CLEAR_SPEED + (Math.random() - 0.5) * 40;
+      state.ball.vy = cDir.y * CORNER_CLEAR_SPEED + (Math.random() - 0.5) * 40;
+      state.cornerTimer = 0;
+      state.cornerClearCooldown = CORNER_CLEAR_COOLDOWN;
+    }
+  } else if (!inCorner) {
+    state.cornerTimer = 0;
+  }
 
   // 9. Check for goal
   const scorer = checkGoal(state.ball);

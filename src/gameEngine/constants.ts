@@ -20,3 +20,16 @@ export const RETURN_SPEED = 115;
 export const BALL_MAX_SPEED = 800;
 export const MATCH_DURATION = 90;
 export const GOAL_PAUSE_DURATION = 2.5;
+
+// Ball control (soft trap for active player)
+export const BALL_CONTROL_RADIUS = 44;
+export const BALL_CONTROL_DAMPING = 0.90;
+export const BALL_CONTROL_FORCE = 110;
+export const BALL_CONTROL_OFFSET = 26;
+
+// Corner clear
+export const CORNER_ZONE_MARGIN = 72;
+export const CORNER_CLEAR_DELAY = 8;
+export const CORNER_CLEAR_SPEED = 360;
+export const CORNER_CLEAR_REPOSITION = 96;
+export const CORNER_CLEAR_COOLDOWN = 1.5;

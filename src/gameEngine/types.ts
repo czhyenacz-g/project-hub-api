@@ -39,4 +39,6 @@ export interface OnlineGameState {
   inputs: { home: InputState; guest: InputState };
   goalMessage: string;
   goalPause: number;
+  cornerTimer: number;
+  cornerClearCooldown: number;
 }

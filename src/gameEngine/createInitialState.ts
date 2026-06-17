@@ -37,5 +37,7 @@ export function createInitialState(): OnlineGameState {
     inputs: { home: makeInput(), guest: makeInput() },
     goalMessage: '',
     goalPause: 0,
+    cornerTimer: 0,
+    cornerClearCooldown: 0,
   };
 }
