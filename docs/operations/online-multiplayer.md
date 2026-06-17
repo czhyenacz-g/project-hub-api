@@ -47,3 +47,8 @@ V game loopu se před každým `tickGame()` uloží skóre, po tiku se porovná 
 ### Veřejné endpointy (bez auth)
 - `GET /api/osma-liga/online-matches?limit=20` — seznam dokončených zápasů
 - `GET /api/osma-liga/online-matches/:id` — detail zápasu s event logem
+
+### Migrace
+Tabulky `OsmaOnlineMatch` a `OsmaOnlineMatchEvent` byly původně vytvořeny přímým SQL.
+Migrace `20260617000000_add_osma_online_match_events` byla zpětně zaznamenána přes `prisma migrate resolve --applied`.
+Viz `docs/operations/prisma-migration-reconciliation.md`.
