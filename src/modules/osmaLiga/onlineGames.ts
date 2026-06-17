@@ -107,13 +107,16 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   state.status = 'playing';
   room.gameState = state;
 
+  const TICK_MS = 33;              // ~30 ticks/s
+  const DT = TICK_MS / 1000;       // 0.033 s per tick
+  const TICKS_PER_SNAPSHOT = 2;    // emit snapshot every 2 ticks = ~15 snapshots/s
+
   let ticksSinceSnapshot = 0;
-  const TICKS_PER_SNAPSHOT = 3; // emit snapshot every 3 ticks = ~15/s
 
   room.gameInterval = setInterval(() => {
     if (!room.gameState) return;
 
-    tickGame(room.gameState, 0.05);
+    tickGame(room.gameState, DT);
     ticksSinceSnapshot++;
 
     if (ticksSinceSnapshot >= TICKS_PER_SNAPSHOT) {
@@ -126,7 +129,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
       room.gameInterval = null;
       emitFn('game_finished', { score: room.gameState.score });
     }
-  }, 50); // 20 ticks/s
+  }, TICK_MS);
 
   return true;
 }
