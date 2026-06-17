@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model OsmaMatchResult {
+  id              String   @id @default(cuid())
+  homeTeamSlug    String
+  homeTeamName    String
+  awayTeamSlug    String
+  awayTeamName    String
+  homeScore       Int
+  awayScore       Int
+  mode            String   @default("singleplayer")
+  durationSeconds Int
+  matchComment    String
+  playedAt        DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([playedAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+}

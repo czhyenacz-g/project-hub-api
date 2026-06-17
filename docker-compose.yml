@@ -1,0 +1,47 @@
+services:
+  project-hub-api:
+    build: .
+    container_name: project-hub-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      DATABASE_URL: postgresql://project_hub_user:${POSTGRES_PASSWORD}@project-hub-postgres:5432/project_hub
+      PROJECT_HUB_API_KEY: ${PROJECT_HUB_API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://osmaliga.cz,https://www.osmaliga.cz}
+      NODE_ENV: production
+    depends_on:
+      project-hub-postgres:
+        condition: service_healthy
+    networks:
+      - project-hub-net
+
+  project-hub-postgres:
+    image: postgres:17-alpine
+    container_name: project-hub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: project_hub
+      POSTGRES_USER: project_hub_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - project_hub_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U project_hub_user -d project_hub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - project-hub-net
+    # Postgres is NOT exposed to the internet — internal network only
+    # For local debug only: expose on localhost:
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+
+volumes:
+  project_hub_postgres_data:
+    name: project_hub_postgres_data
+
+networks:
+  project-hub-net:
+    name: project-hub-net
