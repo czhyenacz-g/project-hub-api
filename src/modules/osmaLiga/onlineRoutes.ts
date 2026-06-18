@@ -4,6 +4,14 @@ import { sendError } from '../../shared/errors.js';
 import { ListOnlineGamesQuerySchema, OnlineGameUserInfoSchema } from './onlineGameValidation.js';
 import { createGame, getGame, joinGame, listGames } from './onlineGames.js';
 import { listOnlineMatches, getOnlineMatchById } from './onlineMatchResultService.js';
+import { db } from '../../db.js';
+
+async function resolveClubId(clubId: string | null | undefined): Promise<string | null | 'invalid'> {
+  if (!clubId) return null;
+  const club = await db.osmaClub.findUnique({ where: { id: clubId }, select: { id: true, isActive: true } });
+  if (!club || !club.isActive) return 'invalid';
+  return club.id;
+}
 
 export async function onlineRoutes(app: FastifyInstance): Promise<void> {
   // POST /api/osma-liga/online-games — create game
@@ -13,7 +21,11 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = OnlineGameUserInfoSchema.safeParse(request.body ?? {});
       const userInfo = parsed.success ? parsed.data : undefined;
-      const room = createGame(userInfo);
+      const resolvedClubId = await resolveClubId(userInfo?.clubId);
+      if (resolvedClubId === 'invalid') {
+        return sendError(reply, 400, 'Invalid club');
+      }
+      const room = createGame({ ...userInfo, clubId: resolvedClubId });
       return reply.status(201).send({
         code: room.code,
         status: room.status,
@@ -77,7 +89,11 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
       const { code } = request.params as { code: string };
       const parsed = OnlineGameUserInfoSchema.safeParse(request.body ?? {});
       const userInfo = parsed.success ? parsed.data : undefined;
-      const result = joinGame(code.toUpperCase(), userInfo);
+      const resolvedClubId = await resolveClubId(userInfo?.clubId);
+      if (resolvedClubId === 'invalid') {
+        return sendError(reply, 400, 'Invalid club');
+      }
+      const result = joinGame(code.toUpperCase(), { ...userInfo, clubId: resolvedClubId });
       if ('error' in result) {
         if (result.error === 'not_found') {
           return sendError(reply, 404, 'Online game not found');

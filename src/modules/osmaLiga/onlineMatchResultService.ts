@@ -46,6 +46,8 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
         finishReason: 'full_time',
         homeUserId: room.homeUserId ?? null,
         awayUserId: room.awayUserId ?? null,
+        homeClubId: room.homeClubId ?? null,
+        awayClubId: room.awayClubId ?? null,
       },
     });
 
@@ -105,6 +107,15 @@ const USER_SELECT = {
   discordId: true,
 } as const;
 
+const CLUB_SELECT = {
+  id: true,
+  slug: true,
+  name: true,
+  shortName: true,
+  banner: true,
+  logo: true,
+} as const;
+
 type RawUser = { id: string; username: string; globalName: string | null; avatar: string | null; discordId: string };
 export type PublicUser = { id: string; username: string; globalName: string | null; avatarUrl: string | null };
 
@@ -139,9 +150,15 @@ export async function listOnlineMatches(limit: number) {
       savedAt: true,
       homeUser: { select: USER_SELECT },
       awayUser: { select: USER_SELECT },
+      homeClub: { select: CLUB_SELECT },
+      awayClub: { select: CLUB_SELECT },
     },
   });
-  return rows.map((r) => ({ ...r, homeUser: sanitizeUser(r.homeUser), awayUser: sanitizeUser(r.awayUser) }));
+  return rows.map((r) => ({
+    ...r,
+    homeUser: sanitizeUser(r.homeUser),
+    awayUser: sanitizeUser(r.awayUser),
+  }));
 }
 
 export async function getOnlineMatchById(id: string) {
@@ -153,6 +170,8 @@ export async function getOnlineMatchById(id: string) {
       },
       homeUser: { select: USER_SELECT },
       awayUser: { select: USER_SELECT },
+      homeClub: { select: CLUB_SELECT },
+      awayClub: { select: CLUB_SELECT },
     },
   });
   if (!match) return null;

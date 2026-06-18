@@ -38,9 +38,11 @@ export type OnlineGameRoom = {
   awayUserName: string | null;
   homeUserAvatar: string | null;
   awayUserAvatar: string | null;
+  homeClubId: string | null;
+  awayClubId: string | null;
 };
 
-type UserInfo = { userId?: string | null; userName?: string | null; userAvatar?: string | null };
+type UserInfo = { userId?: string | null; userName?: string | null; userAvatar?: string | null; clubId?: string | null };
 
 const store = new Map<string, OnlineGameRoom>();
 
@@ -98,6 +100,8 @@ export function createGame(userInfo?: UserInfo): OnlineGameRoom {
     awayUserName: null,
     homeUserAvatar: userInfo?.userAvatar ?? null,
     awayUserAvatar: null,
+    homeClubId: userInfo?.clubId ?? null,
+    awayClubId: null,
   };
   store.set(room.code, room);
   return room;
@@ -120,13 +124,15 @@ export function joinGame(code: string, userInfo?: UserInfo): { room: OnlineGameR
   room.awayUserId = userInfo?.userId ?? null;
   room.awayUserName = userInfo?.userName ?? null;
   room.awayUserAvatar = userInfo?.userAvatar ?? null;
+  room.awayClubId = userInfo?.clubId ?? null;
   return { room, guestToken };
 }
 
 type SafeRoom = Omit<OnlineGameRoom,
   'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' |
   'startedAt' | 'resultSavedAt' | 'onlineMatchId' |
-  'homeUserId' | 'awayUserId' | 'homeUserName' | 'awayUserName' | 'homeUserAvatar' | 'awayUserAvatar'
+  'homeUserId' | 'awayUserId' | 'homeUserName' | 'awayUserName' | 'homeUserAvatar' | 'awayUserAvatar' |
+  'homeClubId' | 'awayClubId'
 >;
 
 export function listGames(limit: number): SafeRoom[] {
@@ -134,7 +140,7 @@ export function listGames(limit: number): SafeRoom[] {
   const games: SafeRoom[] = [];
   for (const room of store.values()) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, onlineMatchId, homeUserId, awayUserId, homeUserName, awayUserName, homeUserAvatar, awayUserAvatar, ...safe } = room;
+    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, onlineMatchId, homeUserId, awayUserId, homeUserName, awayUserName, homeUserAvatar, awayUserAvatar, homeClubId, awayClubId, ...safe } = room;
     games.push(safe);
     if (games.length >= limit) break;
   }

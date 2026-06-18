@@ -46,14 +46,20 @@ model OsmaOnlineMatch {
   savedAt         DateTime @default(now())
   homeUserId      String?
   awayUserId      String?
-  homeUser        OsmaUser? @relation("HomeUser", fields: [homeUserId], references: [id], onDelete: SetNull)
-  awayUser        OsmaUser? @relation("AwayUser", fields: [awayUserId], references: [id], onDelete: SetNull)
+  homeClubId      String?
+  awayClubId      String?
+  homeUser        OsmaUser?  @relation("HomeUser", fields: [homeUserId], references: [id], onDelete: SetNull)
+  awayUser        OsmaUser?  @relation("AwayUser", fields: [awayUserId], references: [id], onDelete: SetNull)
+  homeClub        OsmaClub?  @relation("OsmaOnlineMatchHomeClub", fields: [homeClubId], references: [id])
+  awayClub        OsmaClub?  @relation("OsmaOnlineMatchAwayClub", fields: [awayClubId], references: [id])
   events          OsmaOnlineMatchEvent[]
 
   @@index([savedAt(sort: Desc)])
   @@index([gameCode])
   @@index([homeUserId])
   @@index([awayUserId])
+  @@index([homeClubId])
+  @@index([awayClubId])
 }
 
 model OsmaUser {
@@ -90,6 +96,8 @@ model OsmaClub {
   sortOrder      Int      @default(0)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  homeOnlineMatches OsmaOnlineMatch[] @relation("OsmaOnlineMatchHomeClub")
+  awayOnlineMatches OsmaOnlineMatch[] @relation("OsmaOnlineMatchAwayClub")
 
   @@index([sortOrder])
   @@index([isActive])
