@@ -53,7 +53,7 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /api/osma-liga/clubs/:slug/stats — public club stats aggregated from online matches
+  // GET /api/osma-liga/clubs/:slug/stats — public club stats + top players
   app.get(
     '/api/osma-liga/clubs/:slug/stats',
     async (request, reply) => {
@@ -61,14 +61,39 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
       const club = await db.osmaClub.findUnique({ where: { id: slug }, select: { id: true, slug: true, name: true, shortName: true, isActive: true } });
       if (!club || !club.isActive) return sendError(reply, 404, 'Club not found');
 
-      const homeMatches = await db.osmaOnlineMatch.findMany({
-        where: { homeClubId: slug },
-        select: { homeScore: true, awayScore: true, homeClubPoints: true },
-      });
-      const awayMatches = await db.osmaOnlineMatch.findMany({
-        where: { awayClubId: slug },
-        select: { homeScore: true, awayScore: true, awayClubPoints: true },
-      });
+      const USER_SELECT = { id: true, username: true, globalName: true, avatar: true, discordId: true } as const;
+
+      const [homeMatches, awayMatches] = await Promise.all([
+        db.osmaOnlineMatch.findMany({
+          where: { homeClubId: slug },
+          select: { homeScore: true, awayScore: true, homeClubPoints: true, homeUser: { select: USER_SELECT } },
+        }),
+        db.osmaOnlineMatch.findMany({
+          where: { awayClubId: slug },
+          select: { homeScore: true, awayScore: true, awayClubPoints: true, awayUser: { select: USER_SELECT } },
+        }),
+      ]);
+
+      type RawUser = { id: string; username: string; globalName: string | null; avatar: string | null; discordId: string };
+      type PlayerAgg = { username: string; globalName: string | null; avatarUrl: string | null; points: number; matches: number; wins: number; draws: number; losses: number; goalsFor: number; goalsAgainst: number };
+      const playerMap = new Map<string, PlayerAgg>();
+
+      function upsertPlayer(user: RawUser | null, pts: number, gf: number, ga: number, result: 'win' | 'draw' | 'loss'): void {
+        if (!user) return;
+        const avatarUrl = user.avatar ? `https://cdn.discordapp.com/avatars/${user.discordId}/${user.avatar}.png?size=64` : null;
+        const existing = playerMap.get(user.id);
+        if (existing) {
+          existing.points += pts;
+          existing.matches++;
+          existing.goalsFor += gf;
+          existing.goalsAgainst += ga;
+          if (result === 'win') existing.wins++;
+          else if (result === 'draw') existing.draws++;
+          else existing.losses++;
+        } else {
+          playerMap.set(user.id, { username: user.username, globalName: user.globalName, avatarUrl, points: pts, matches: 1, wins: result === 'win' ? 1 : 0, draws: result === 'draw' ? 1 : 0, losses: result === 'loss' ? 1 : 0, goalsFor: gf, goalsAgainst: ga });
+        }
+      }
 
       let matches = 0, wins = 0, draws = 0, losses = 0, goalsFor = 0, goalsAgainst = 0, points = 0;
 
@@ -78,9 +103,11 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
         goalsAgainst += m.awayScore;
         const pts = m.homeClubPoints ?? calculateClubPoints(m.homeScore, m.awayScore).homeClubPoints;
         points += pts;
-        if (m.homeScore > m.awayScore) wins++;
-        else if (m.homeScore === m.awayScore) draws++;
+        const result: 'win' | 'draw' | 'loss' = m.homeScore > m.awayScore ? 'win' : m.homeScore === m.awayScore ? 'draw' : 'loss';
+        if (result === 'win') wins++;
+        else if (result === 'draw') draws++;
         else losses++;
+        upsertPlayer(m.homeUser, pts, m.homeScore, m.awayScore, result);
       }
       for (const m of awayMatches) {
         matches++;
@@ -88,14 +115,30 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
         goalsAgainst += m.homeScore;
         const pts = m.awayClubPoints ?? calculateClubPoints(m.homeScore, m.awayScore).awayClubPoints;
         points += pts;
-        if (m.awayScore > m.homeScore) wins++;
-        else if (m.awayScore === m.homeScore) draws++;
+        const result: 'win' | 'draw' | 'loss' = m.awayScore > m.homeScore ? 'win' : m.awayScore === m.homeScore ? 'draw' : 'loss';
+        if (result === 'win') wins++;
+        else if (result === 'draw') draws++;
         else losses++;
+        upsertPlayer(m.awayUser, pts, m.awayScore, m.homeScore, result);
       }
+
+      const topPlayers = Array.from(playerMap.entries())
+        .map(([userId, agg]) => ({ userId, ...agg }))
+        .sort((a, b) => {
+          if (b.points !== a.points) return b.points - a.points;
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          const adiff = a.goalsFor - a.goalsAgainst;
+          const bdiff = b.goalsFor - b.goalsAgainst;
+          if (bdiff !== adiff) return bdiff - adiff;
+          if (b.goalsFor !== a.goalsFor) return b.goalsFor - a.goalsFor;
+          return (a.globalName ?? a.username).localeCompare(b.globalName ?? b.username);
+        })
+        .slice(0, 5);
 
       return reply.send({
         club: { id: club.id, slug: club.slug, name: club.name, shortName: club.shortName },
         stats: { matches, wins, draws, losses, goalsFor, goalsAgainst, goalDifference: goalsFor - goalsAgainst, points },
+        topPlayers,
       });
     },
   );
