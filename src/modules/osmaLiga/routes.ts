@@ -42,11 +42,15 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /api/osma-liga/clubs/standings — public, all active clubs sorted by points
+  // GET /api/osma-liga/clubs/standings — public, rolling 30-day window
   // Must be declared BEFORE /clubs/:slug to avoid 'standings' being matched as slug
   app.get(
     '/api/osma-liga/clubs/standings',
     async (_request, reply) => {
+      const until = new Date();
+      const since = new Date(until);
+      since.setDate(since.getDate() - 30);
+
       const clubs = await db.osmaClub.findMany({
         where: { isActive: true },
         select: { id: true, slug: true, name: true, shortName: true, banner: true, logo: true },
@@ -55,7 +59,10 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
 
       const clubIds = clubs.map((c) => c.id);
       const matches = await db.osmaOnlineMatch.findMany({
-        where: { OR: [{ homeClubId: { in: clubIds } }, { awayClubId: { in: clubIds } }] },
+        where: {
+          OR: [{ homeClubId: { in: clubIds } }, { awayClubId: { in: clubIds } }],
+          finishedAt: { gte: since },
+        },
         select: { homeClubId: true, awayClubId: true, homeScore: true, awayScore: true, homeClubPoints: true, awayClubPoints: true },
       });
 
@@ -100,7 +107,8 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
           return a.club.name.localeCompare(b.club.name);
         });
 
-      return reply.send({ standings });
+      const period = { type: 'rolling_30_days' as const, days: 30, since: since.toISOString(), until: until.toISOString() };
+      return reply.send({ period, standings });
     },
   );
 
@@ -115,7 +123,7 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // GET /api/osma-liga/clubs/:slug/stats — public club stats + top players
+  // GET /api/osma-liga/clubs/:slug/stats — public club stats + top players, rolling 30-day window
   app.get(
     '/api/osma-liga/clubs/:slug/stats',
     async (request, reply) => {
@@ -123,15 +131,19 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
       const club = await db.osmaClub.findUnique({ where: { id: slug }, select: { id: true, slug: true, name: true, shortName: true, isActive: true } });
       if (!club || !club.isActive) return sendError(reply, 404, 'Club not found');
 
+      const until = new Date();
+      const since = new Date(until);
+      since.setDate(since.getDate() - 30);
+
       const USER_SELECT = { id: true, username: true, globalName: true, avatar: true, discordId: true } as const;
 
       const [homeMatches, awayMatches] = await Promise.all([
         db.osmaOnlineMatch.findMany({
-          where: { homeClubId: slug },
+          where: { homeClubId: slug, finishedAt: { gte: since } },
           select: { homeScore: true, awayScore: true, homeClubPoints: true, homeUser: { select: USER_SELECT } },
         }),
         db.osmaOnlineMatch.findMany({
-          where: { awayClubId: slug },
+          where: { awayClubId: slug, finishedAt: { gte: since } },
           select: { homeScore: true, awayScore: true, awayClubPoints: true, awayUser: { select: USER_SELECT } },
         }),
       ]);
@@ -197,7 +209,9 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
         })
         .slice(0, 5);
 
+      const period = { type: 'rolling_30_days' as const, days: 30, since: since.toISOString(), until: until.toISOString() };
       return reply.send({
+        period,
         club: { id: club.id, slug: club.slug, name: club.name, shortName: club.shortName },
         stats: { matches, wins, draws, losses, goalsFor, goalsAgainst, goalDifference: goalsFor - goalsAgainst, points },
         topPlayers,
