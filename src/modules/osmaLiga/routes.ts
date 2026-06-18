@@ -42,6 +42,68 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // GET /api/osma-liga/clubs/standings — public, all active clubs sorted by points
+  // Must be declared BEFORE /clubs/:slug to avoid 'standings' being matched as slug
+  app.get(
+    '/api/osma-liga/clubs/standings',
+    async (_request, reply) => {
+      const clubs = await db.osmaClub.findMany({
+        where: { isActive: true },
+        select: { id: true, slug: true, name: true, shortName: true, banner: true, logo: true },
+        orderBy: { sortOrder: 'asc' },
+      });
+
+      const clubIds = clubs.map((c) => c.id);
+      const matches = await db.osmaOnlineMatch.findMany({
+        where: { OR: [{ homeClubId: { in: clubIds } }, { awayClubId: { in: clubIds } }] },
+        select: { homeClubId: true, awayClubId: true, homeScore: true, awayScore: true, homeClubPoints: true, awayClubPoints: true },
+      });
+
+      type Stats = { matches: number; wins: number; draws: number; losses: number; goalsFor: number; goalsAgainst: number; points: number };
+      const statsMap = new Map<string, Stats>();
+      for (const c of clubs) {
+        statsMap.set(c.id, { matches: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0, points: 0 });
+      }
+
+      for (const m of matches) {
+        if (m.homeClubId && statsMap.has(m.homeClubId)) {
+          const s = statsMap.get(m.homeClubId)!;
+          s.matches++;
+          s.goalsFor += m.homeScore;
+          s.goalsAgainst += m.awayScore;
+          s.points += m.homeClubPoints ?? calculateClubPoints(m.homeScore, m.awayScore).homeClubPoints;
+          if (m.homeScore > m.awayScore) s.wins++;
+          else if (m.homeScore === m.awayScore) s.draws++;
+          else s.losses++;
+        }
+        if (m.awayClubId && statsMap.has(m.awayClubId)) {
+          const s = statsMap.get(m.awayClubId)!;
+          s.matches++;
+          s.goalsFor += m.awayScore;
+          s.goalsAgainst += m.homeScore;
+          s.points += m.awayClubPoints ?? calculateClubPoints(m.homeScore, m.awayScore).awayClubPoints;
+          if (m.awayScore > m.homeScore) s.wins++;
+          else if (m.awayScore === m.homeScore) s.draws++;
+          else s.losses++;
+        }
+      }
+
+      const standings = clubs
+        .map((c) => {
+          const s = statsMap.get(c.id)!;
+          return { club: { id: c.id, slug: c.slug, name: c.name, shortName: c.shortName, bannerPath: c.banner ?? null, logoPath: c.logo ?? null }, stats: { ...s, goalDifference: s.goalsFor - s.goalsAgainst } };
+        })
+        .sort((a, b) => {
+          if (b.stats.points !== a.stats.points) return b.stats.points - a.stats.points;
+          if (b.stats.goalDifference !== a.stats.goalDifference) return b.stats.goalDifference - a.stats.goalDifference;
+          if (b.stats.goalsFor !== a.stats.goalsFor) return b.stats.goalsFor - a.stats.goalsFor;
+          return a.club.name.localeCompare(b.club.name);
+        });
+
+      return reply.send({ standings });
+    },
+  );
+
   app.get(
     '/api/osma-liga/clubs/:slug',
     { preHandler: apiKeyAuth },
