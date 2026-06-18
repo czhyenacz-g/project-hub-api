@@ -105,8 +105,23 @@ const USER_SELECT = {
   discordId: true,
 } as const;
 
+type RawUser = { id: string; username: string; globalName: string | null; avatar: string | null; discordId: string };
+export type PublicUser = { id: string; username: string; globalName: string | null; avatarUrl: string | null };
+
+function sanitizeUser(u: RawUser | null): PublicUser | null {
+  if (!u) return null;
+  return {
+    id: u.id,
+    username: u.username,
+    globalName: u.globalName,
+    avatarUrl: u.avatar
+      ? `https://cdn.discordapp.com/avatars/${u.discordId}/${u.avatar}.png?size=64`
+      : null,
+  };
+}
+
 export async function listOnlineMatches(limit: number) {
-  return db.osmaOnlineMatch.findMany({
+  const rows = await db.osmaOnlineMatch.findMany({
     orderBy: { savedAt: 'desc' },
     take: limit,
     select: {
@@ -126,10 +141,11 @@ export async function listOnlineMatches(limit: number) {
       awayUser: { select: USER_SELECT },
     },
   });
+  return rows.map((r) => ({ ...r, homeUser: sanitizeUser(r.homeUser), awayUser: sanitizeUser(r.awayUser) }));
 }
 
 export async function getOnlineMatchById(id: string) {
-  return db.osmaOnlineMatch.findUnique({
+  const match = await db.osmaOnlineMatch.findUnique({
     where: { id },
     include: {
       events: {
@@ -139,4 +155,6 @@ export async function getOnlineMatchById(id: string) {
       awayUser: { select: USER_SELECT },
     },
   });
+  if (!match) return null;
+  return { ...match, homeUser: sanitizeUser(match.homeUser), awayUser: sanitizeUser(match.awayUser) };
 }
