@@ -1,5 +1,5 @@
 import { db } from '../../db.js';
-import { CreateMatchResultInput } from './validation.js';
+import { CreateMatchResultInput, DiscordUpsertInput } from './validation.js';
 
 const HOME_TEAM_SLUG = 'nahoda-fc';
 const HOME_TEAM_NAME = 'Náhoda FC';
@@ -33,5 +33,22 @@ export async function listMatchResults(limit: number) {
   return db.osmaMatchResult.findMany({
     orderBy: { playedAt: 'desc' },
     take: limit,
+  });
+}
+
+export async function upsertDiscordUser(input: DiscordUpsertInput) {
+  return db.osmaUser.upsert({
+    where: { discordId: input.discordId },
+    update: {
+      username: input.username,
+      globalName: input.globalName ?? null,
+      avatar: input.avatar ?? null,
+    },
+    create: {
+      discordId: input.discordId,
+      username: input.username,
+      globalName: input.globalName ?? null,
+      avatar: input.avatar ?? null,
+    },
   });
 }

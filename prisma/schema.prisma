@@ -50,6 +50,18 @@ model OsmaOnlineMatch {
   @@index([gameCode])
 }
 
+model OsmaUser {
+  id         String   @id @default(cuid())
+  discordId  String   @unique
+  username   String
+  globalName String?
+  avatar     String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([discordId])
+}
+
 model OsmaOnlineMatchEvent {
   id             String          @id @default(cuid())
   onlineMatchId  String

@@ -11,3 +11,12 @@ export const ListMatchResultsQuerySchema = z.object({
 });
 
 export type CreateMatchResultInput = z.infer<typeof CreateMatchResultSchema>;
+
+export const DiscordUpsertSchema = z.object({
+  discordId: z.string().min(1),
+  username: z.string().min(1),
+  globalName: z.string().nullable().optional(),
+  avatar: z.string().nullable().optional(),
+});
+
+export type DiscordUpsertInput = z.infer<typeof DiscordUpsertSchema>;
