@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { apiKeyAuth } from '../../shared/apiKeyAuth.js';
 import { sendError } from '../../shared/errors.js';
 import { CreateMatchResultSchema, ListMatchResultsQuerySchema, DiscordUpsertSchema } from './validation.js';
-import { createMatchResult, listMatchResults, upsertDiscordUser } from './service.js';
+import { createMatchResult, listMatchResults, upsertDiscordUser, listClubs, getClubBySlug } from './service.js';
 
 export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -28,6 +28,26 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
       }
       const results = await listMatchResults(parsed.data.limit);
       return reply.send(results);
+    },
+  );
+
+  app.get(
+    '/api/osma-liga/clubs',
+    { preHandler: apiKeyAuth },
+    async (_request, reply) => {
+      const clubs = await listClubs();
+      return reply.send(clubs);
+    },
+  );
+
+  app.get(
+    '/api/osma-liga/clubs/:slug',
+    { preHandler: apiKeyAuth },
+    async (request, reply) => {
+      const { slug } = request.params as { slug: string };
+      const club = await getClubBySlug(slug);
+      if (!club) return sendError(reply, 404, 'Club not found');
+      return reply.send(club);
     },
   );
 

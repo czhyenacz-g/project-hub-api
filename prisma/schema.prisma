@@ -70,6 +70,31 @@ model OsmaUser {
   @@index([discordId])
 }
 
+model OsmaClub {
+  id             String   @id
+  slug           String   @unique
+  name           String
+  shortName      String?
+  city           String?
+  location       String?
+  note           String?
+  colors         String?
+  motto          String
+  description    String
+  seasonComment  String?
+  banner         String?
+  logo           String?
+  primaryColor   String?
+  secondaryColor String?
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@index([isActive])
+}
+
 model OsmaOnlineMatchEvent {
   id             String          @id @default(cuid())
   onlineMatchId  String

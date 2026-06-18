@@ -36,6 +36,17 @@ export async function listMatchResults(limit: number) {
   });
 }
 
+export async function listClubs() {
+  return db.osmaClub.findMany({
+    where: { isActive: true },
+    orderBy: { sortOrder: 'asc' },
+  });
+}
+
+export async function getClubBySlug(slug: string) {
+  return db.osmaClub.findUnique({ where: { slug } });
+}
+
 export async function upsertDiscordUser(input: DiscordUpsertInput) {
   return db.osmaUser.upsert({
     where: { discordId: input.discordId },
