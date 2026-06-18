@@ -51,10 +51,11 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
       const response = games.map((g) => ({
         code: g.code,
         status: g.status,
-        players: g.status === 'full' ? 2 : 1,
+        players: (g.status === 'full' || g.status === 'playing' || g.status === 'finished') ? 2 : 1,
         maxPlayers: 2,
         createdAt: g.createdAt,
         expiresAt: g.expiresAt,
+        onlineMatchId: g.onlineMatchId ?? null,
       }));
       return reply.send(response);
     },

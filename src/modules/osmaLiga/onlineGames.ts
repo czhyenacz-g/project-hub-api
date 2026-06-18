@@ -20,7 +20,7 @@ export type OnlineMatchEventDraft = {
 
 export type OnlineGameRoom = {
   code: string;
-  status: 'waiting' | 'full' | 'expired';
+  status: 'waiting' | 'full' | 'playing' | 'finished' | 'expired';
   hostToken: string;
   guestToken: string | null;
   createdAt: string;
@@ -130,7 +130,7 @@ export function joinGame(code: string, userInfo?: UserInfo): { room: OnlineGameR
 
 type SafeRoom = Omit<OnlineGameRoom,
   'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' |
-  'startedAt' | 'resultSavedAt' | 'onlineMatchId' |
+  'startedAt' | 'resultSavedAt' |
   'homeUserId' | 'awayUserId' | 'homeUserName' | 'awayUserName' | 'homeUserAvatar' | 'awayUserAvatar' |
   'homeClubId' | 'awayClubId'
 >;
@@ -140,7 +140,7 @@ export function listGames(limit: number): SafeRoom[] {
   const games: SafeRoom[] = [];
   for (const room of store.values()) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, onlineMatchId, homeUserId, awayUserId, homeUserName, awayUserName, homeUserAvatar, awayUserAvatar, homeClubId, awayClubId, ...safe } = room;
+    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, homeUserId, awayUserId, homeUserName, awayUserName, homeUserAvatar, awayUserAvatar, homeClubId, awayClubId, ...safe } = room;
     games.push(safe);
     if (games.length >= limit) break;
   }
@@ -157,6 +157,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   const state = createInitialState();
   state.status = 'playing';
   room.gameState = state;
+  room.status = 'playing';
   room.startedAt = new Date();
   room.events.push({
     type: 'match_started',
@@ -221,6 +222,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
       });
       clearInterval(room.gameInterval!);
       room.gameInterval = null;
+      room.status = 'finished';
       emitFn('game_finished', { score: room.gameState.score });
       void saveOnlineMatchResult(room).catch((e: unknown) => {
         console.error('[onlineGames] Failed to save online match result:', e);
