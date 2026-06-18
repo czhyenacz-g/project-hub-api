@@ -44,20 +44,28 @@ model OsmaOnlineMatch {
   finishReason    String   @default("full_time")
   publicResultId  String?
   savedAt         DateTime @default(now())
+  homeUserId      String?
+  awayUserId      String?
+  homeUser        OsmaUser? @relation("HomeUser", fields: [homeUserId], references: [id], onDelete: SetNull)
+  awayUser        OsmaUser? @relation("AwayUser", fields: [awayUserId], references: [id], onDelete: SetNull)
   events          OsmaOnlineMatchEvent[]
 
   @@index([savedAt(sort: Desc)])
   @@index([gameCode])
+  @@index([homeUserId])
+  @@index([awayUserId])
 }
 
 model OsmaUser {
-  id         String   @id @default(cuid())
-  discordId  String   @unique
-  username   String
-  globalName String?
-  avatar     String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id          String   @id @default(cuid())
+  discordId   String   @unique
+  username    String
+  globalName  String?
+  avatar      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  homeMatches OsmaOnlineMatch[] @relation("HomeUser")
+  awayMatches OsmaOnlineMatch[] @relation("AwayUser")
 
   @@index([discordId])
 }

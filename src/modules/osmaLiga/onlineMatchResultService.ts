@@ -44,6 +44,8 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
         finishedAt,
         durationSeconds,
         finishReason: 'full_time',
+        homeUserId: room.homeUserId ?? null,
+        awayUserId: room.awayUserId ?? null,
       },
     });
 
@@ -95,6 +97,14 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
   room.resultSavedAt = finishedAt;
 }
 
+const USER_SELECT = {
+  id: true,
+  username: true,
+  globalName: true,
+  avatar: true,
+  discordId: true,
+} as const;
+
 export async function listOnlineMatches(limit: number) {
   return db.osmaOnlineMatch.findMany({
     orderBy: { savedAt: 'desc' },
@@ -112,6 +122,8 @@ export async function listOnlineMatches(limit: number) {
       startedAt: true,
       finishedAt: true,
       savedAt: true,
+      homeUser: { select: USER_SELECT },
+      awayUser: { select: USER_SELECT },
     },
   });
 }
@@ -123,6 +135,8 @@ export async function getOnlineMatchById(id: string) {
       events: {
         orderBy: [{ matchSecond: 'asc' }, { createdAt: 'asc' }],
       },
+      homeUser: { select: USER_SELECT },
+      awayUser: { select: USER_SELECT },
     },
   });
 }

@@ -32,7 +32,15 @@ export type OnlineGameRoom = {
   startedAt: Date | null;
   resultSavedAt: Date | null;
   onlineMatchId: string | null;
+  homeUserId: string | null;
+  awayUserId: string | null;
+  homeUserName: string | null;
+  awayUserName: string | null;
+  homeUserAvatar: string | null;
+  awayUserAvatar: string | null;
 };
+
+type UserInfo = { userId?: string | null; userName?: string | null; userAvatar?: string | null };
 
 const store = new Map<string, OnlineGameRoom>();
 
@@ -66,7 +74,7 @@ export function cleanupExpired(): void {
   }
 }
 
-export function createGame(): OnlineGameRoom {
+export function createGame(userInfo?: UserInfo): OnlineGameRoom {
   cleanupExpired();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ONLINE_GAME_TTL_MINUTES * 60 * 1000);
@@ -84,6 +92,12 @@ export function createGame(): OnlineGameRoom {
     startedAt: null,
     resultSavedAt: null,
     onlineMatchId: null,
+    homeUserId: userInfo?.userId ?? null,
+    awayUserId: null,
+    homeUserName: userInfo?.userName ?? null,
+    awayUserName: null,
+    homeUserAvatar: userInfo?.userAvatar ?? null,
+    awayUserAvatar: null,
   };
   store.set(room.code, room);
   return room;
@@ -94,7 +108,7 @@ export function getGame(code: string): OnlineGameRoom | null {
   return store.get(code) ?? null;
 }
 
-export function joinGame(code: string): { room: OnlineGameRoom; guestToken: string } | { error: 'not_found' | 'full' } {
+export function joinGame(code: string, userInfo?: UserInfo): { room: OnlineGameRoom; guestToken: string } | { error: 'not_found' | 'full' } {
   cleanupExpired();
   const room = store.get(code);
   if (!room) return { error: 'not_found' };
@@ -103,15 +117,24 @@ export function joinGame(code: string): { room: OnlineGameRoom; guestToken: stri
   room.guestToken = guestToken;
   room.status = 'full';
   room.updatedAt = new Date().toISOString();
+  room.awayUserId = userInfo?.userId ?? null;
+  room.awayUserName = userInfo?.userName ?? null;
+  room.awayUserAvatar = userInfo?.userAvatar ?? null;
   return { room, guestToken };
 }
 
-export function listGames(limit: number): Omit<OnlineGameRoom, 'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' | 'startedAt' | 'resultSavedAt' | 'onlineMatchId'>[] {
+type SafeRoom = Omit<OnlineGameRoom,
+  'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' |
+  'startedAt' | 'resultSavedAt' | 'onlineMatchId' |
+  'homeUserId' | 'awayUserId' | 'homeUserName' | 'awayUserName' | 'homeUserAvatar' | 'awayUserAvatar'
+>;
+
+export function listGames(limit: number): SafeRoom[] {
   cleanupExpired();
-  const games: Omit<OnlineGameRoom, 'hostToken' | 'guestToken' | 'gameState' | 'gameInterval' | 'events' | 'startedAt' | 'resultSavedAt' | 'onlineMatchId'>[] = [];
+  const games: SafeRoom[] = [];
   for (const room of store.values()) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, onlineMatchId, ...safe } = room;
+    const { hostToken, guestToken, gameState, gameInterval, events, startedAt, resultSavedAt, onlineMatchId, homeUserId, awayUserId, homeUserName, awayUserName, homeUserAvatar, awayUserAvatar, ...safe } = room;
     games.push(safe);
     if (games.length >= limit) break;
   }

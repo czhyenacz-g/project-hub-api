@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { apiKeyAuth } from '../../shared/apiKeyAuth.js';
 import { sendError } from '../../shared/errors.js';
-import { ListOnlineGamesQuerySchema } from './onlineGameValidation.js';
+import { ListOnlineGamesQuerySchema, OnlineGameUserInfoSchema } from './onlineGameValidation.js';
 import { createGame, getGame, joinGame, listGames } from './onlineGames.js';
 import { listOnlineMatches, getOnlineMatchById } from './onlineMatchResultService.js';
 
@@ -10,8 +10,10 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     '/api/osma-liga/online-games',
     { preHandler: apiKeyAuth },
-    async (_request, reply) => {
-      const room = createGame();
+    async (request, reply) => {
+      const parsed = OnlineGameUserInfoSchema.safeParse(request.body ?? {});
+      const userInfo = parsed.success ? parsed.data : undefined;
+      const room = createGame(userInfo);
       return reply.status(201).send({
         code: room.code,
         status: room.status,
@@ -73,7 +75,9 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: apiKeyAuth },
     async (request, reply) => {
       const { code } = request.params as { code: string };
-      const result = joinGame(code.toUpperCase());
+      const parsed = OnlineGameUserInfoSchema.safeParse(request.body ?? {});
+      const userInfo = parsed.success ? parsed.data : undefined;
+      const result = joinGame(code.toUpperCase(), userInfo);
       if ('error' in result) {
         if (result.error === 'not_found') {
           return sendError(reply, 404, 'Online game not found');
