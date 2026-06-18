@@ -2,6 +2,12 @@ import { Prisma } from '@prisma/client';
 import { db } from '../../db.js';
 import type { OnlineGameRoom } from './onlineGames.js';
 
+export function calculateClubPoints(homeScore: number, awayScore: number) {
+  if (homeScore > awayScore) return { homeClubPoints: 3, awayClubPoints: 0 };
+  if (homeScore < awayScore) return { homeClubPoints: 0, awayClubPoints: 3 };
+  return { homeClubPoints: 1, awayClubPoints: 1 };
+}
+
 const HOME_TEAM_SLUG = 'nahoda-fc';
 const HOME_TEAM_NAME = 'Náhoda FC';
 const AWAY_TEAM_SLUG = 'fk-parezov';
@@ -21,6 +27,7 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
   const finishedAt = new Date();
   const winnerSide =
     score.home > score.away ? 'home' : score.away > score.home ? 'away' : 'draw';
+  const clubPoints = calculateClubPoints(score.home, score.away);
   const durationSeconds = Math.round(
     (finishedAt.getTime() - room.startedAt.getTime()) / 1000,
   );
@@ -48,6 +55,8 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
         awayUserId: room.awayUserId ?? null,
         homeClubId: room.homeClubId ?? null,
         awayClubId: room.awayClubId ?? null,
+        homeClubPoints: clubPoints.homeClubPoints,
+        awayClubPoints: clubPoints.awayClubPoints,
       },
     });
 
@@ -152,6 +161,8 @@ export async function listOnlineMatches(limit: number) {
       awayUser: { select: USER_SELECT },
       homeClub: { select: CLUB_SELECT },
       awayClub: { select: CLUB_SELECT },
+      homeClubPoints: true,
+      awayClubPoints: true,
     },
   });
   return rows.map((r) => ({

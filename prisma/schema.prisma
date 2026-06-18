@@ -48,6 +48,8 @@ model OsmaOnlineMatch {
   awayUserId      String?
   homeClubId      String?
   awayClubId      String?
+  homeClubPoints  Int?
+  awayClubPoints  Int?
   homeUser        OsmaUser?  @relation("HomeUser", fields: [homeUserId], references: [id], onDelete: SetNull)
   awayUser        OsmaUser?  @relation("AwayUser", fields: [awayUserId], references: [id], onDelete: SetNull)
   homeClub        OsmaClub?  @relation("OsmaOnlineMatchHomeClub", fields: [homeClubId], references: [id])
