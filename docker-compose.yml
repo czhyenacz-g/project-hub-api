@@ -8,6 +8,7 @@ services:
     environment:
       DATABASE_URL: postgresql://project_hub_user:${POSTGRES_PASSWORD}@project-hub-postgres:5432/project_hub
       PROJECT_HUB_API_KEY: ${PROJECT_HUB_API_KEY}
+      TRAINING_CRON_SECRET: ${TRAINING_CRON_SECRET:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://osmaliga.cz,https://www.osmaliga.cz}
       NODE_ENV: production
     depends_on:

@@ -10,4 +10,7 @@ export const config = {
   databaseUrl: requireEnv('DATABASE_URL'),
   apiKey: requireEnv('PROJECT_HUB_API_KEY'),
   corsOrigins: (process.env.CORS_ORIGINS ?? 'http://localhost:3000').split(','),
+  // Optional on purpose — missing this must not crash the whole API on boot.
+  // The training-challenge cron endpoint checks it at request time and fails safely if unset.
+  trainingCronSecret: process.env.TRAINING_CRON_SECRET ?? null,
 } as const;
