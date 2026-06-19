@@ -23,7 +23,7 @@ Chování:
   nevytvoří a vrátí `{"ok":true,"status":"skipped",...}`,
 - jinak vybere náhodný aktivní fiktivní klub, vytvoří room a vrátí
   `{"ok":true,"status":"created","game":{...}}`,
-- výzva platí 15 minut (`TRAINING_CHALLENGE_TTL_MINUTES` v
+- výzva platí 10 minut (`TRAINING_CHALLENGE_TTL_MINUTES` v
   `src/modules/osmaLiga/onlineGames.ts`).
 
 Endpoint je chráněný `TRAINING_CRON_SECRET`, ne `PROJECT_HUB_API_KEY`.

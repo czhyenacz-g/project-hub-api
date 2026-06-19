@@ -6,7 +6,7 @@ import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 
 export const ONLINE_GAME_TTL_MINUTES = 30;
 export const LOOKING_FOR_OPPONENT_TTL_MINUTES = 10;
-export const TRAINING_CHALLENGE_TTL_MINUTES = 15;
+export const TRAINING_CHALLENGE_TTL_MINUTES = 10;
 
 export type OnlineMatchEventDraft = {
   type: string;
