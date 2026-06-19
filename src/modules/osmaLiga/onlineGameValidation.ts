@@ -12,3 +12,7 @@ export const OnlineGameUserInfoSchema = z.object({
 });
 
 export type OnlineGameUserInfo = z.infer<typeof OnlineGameUserInfoSchema>;
+
+export const LookingForOpponentBodySchema = z.object({
+  playerToken: z.string().min(1),
+});

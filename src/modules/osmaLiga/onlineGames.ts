@@ -5,6 +5,7 @@ import { MATCH_DURATION } from '../../gameEngine/constants.js';
 import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 
 export const ONLINE_GAME_TTL_MINUTES = 30;
+export const LOOKING_FOR_OPPONENT_TTL_MINUTES = 10;
 
 export type OnlineMatchEventDraft = {
   type: string;
@@ -40,6 +41,9 @@ export type OnlineGameRoom = {
   awayUserAvatar: string | null;
   homeClubId: string | null;
   awayClubId: string | null;
+  lookingForOpponent: boolean;
+  lookingForOpponentAt: string | null;
+  lookingForOpponentExpiresAt: string | null;
 };
 
 type UserInfo = { userId?: string | null; userName?: string | null; userAvatar?: string | null; clubId?: string | null };
@@ -102,6 +106,9 @@ export function createGame(userInfo?: UserInfo): OnlineGameRoom {
     awayUserAvatar: null,
     homeClubId: userInfo?.clubId ?? null,
     awayClubId: null,
+    lookingForOpponent: false,
+    lookingForOpponentAt: null,
+    lookingForOpponentExpiresAt: null,
   };
   store.set(room.code, room);
   return room;
@@ -125,7 +132,53 @@ export function joinGame(code: string, userInfo?: UserInfo): { room: OnlineGameR
   room.awayUserName = userInfo?.userName ?? null;
   room.awayUserAvatar = userInfo?.userAvatar ?? null;
   room.awayClubId = userInfo?.clubId ?? null;
+  // Opponent found — the homepage callout no longer applies
+  room.lookingForOpponent = false;
   return { room, guestToken };
+}
+
+export function setLookingForOpponent(
+  code: string,
+  hostToken: string,
+): { ok: true; expiresAt: string } | { error: 'not_found' | 'forbidden' | 'not_waiting' } {
+  cleanupExpired();
+  const room = store.get(code);
+  if (!room) return { error: 'not_found' };
+  if (room.hostToken !== hostToken) return { error: 'forbidden' };
+  if (room.guestToken !== null || room.status !== 'waiting') return { error: 'not_waiting' };
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + LOOKING_FOR_OPPONENT_TTL_MINUTES * 60 * 1000);
+  room.lookingForOpponent = true;
+  room.lookingForOpponentAt = now.toISOString();
+  room.lookingForOpponentExpiresAt = expiresAt.toISOString();
+  room.updatedAt = now.toISOString();
+  return { ok: true, expiresAt: room.lookingForOpponentExpiresAt };
+}
+
+function isLookingForOpponentActive(room: OnlineGameRoom, now: Date): boolean {
+  return (
+    room.lookingForOpponent &&
+    room.guestToken === null &&
+    room.status === 'waiting' &&
+    !!room.lookingForOpponentExpiresAt &&
+    new Date(room.lookingForOpponentExpiresAt) > now
+  );
+}
+
+// Picks the most recently posted active "looking for opponent" callout.
+// Only one is shown on the homepage at a time.
+export function getActiveLookingForOpponentGame(): OnlineGameRoom | null {
+  cleanupExpired();
+  const now = new Date();
+  let best: OnlineGameRoom | null = null;
+  for (const room of store.values()) {
+    if (!isLookingForOpponentActive(room, now)) continue;
+    if (!best || (room.lookingForOpponentAt ?? '') > (best.lookingForOpponentAt ?? '')) {
+      best = room;
+    }
+  }
+  return best;
 }
 
 type SafeRoom = Omit<OnlineGameRoom,

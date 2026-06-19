@@ -1,8 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { apiKeyAuth } from '../../shared/apiKeyAuth.js';
 import { sendError } from '../../shared/errors.js';
-import { ListOnlineGamesQuerySchema, OnlineGameUserInfoSchema } from './onlineGameValidation.js';
-import { createGame, getGame, joinGame, listGames } from './onlineGames.js';
+import { ListOnlineGamesQuerySchema, OnlineGameUserInfoSchema, LookingForOpponentBodySchema } from './onlineGameValidation.js';
+import { createGame, getGame, joinGame, listGames, setLookingForOpponent, getActiveLookingForOpponentGame } from './onlineGames.js';
 import { listOnlineMatches, getOnlineMatchById } from './onlineMatchResultService.js';
 import { db } from '../../db.js';
 
@@ -111,6 +111,59 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
         maxPlayers: 2,
         playerToken: guestToken,
         expiresAt: room.expiresAt,
+      });
+    },
+  );
+
+  // POST /api/osma-liga/online-games/:code/looking-for-opponent — post a callout
+  app.post(
+    '/api/osma-liga/online-games/:code/looking-for-opponent',
+    { preHandler: apiKeyAuth },
+    async (request, reply) => {
+      const { code } = request.params as { code: string };
+      const parsed = LookingForOpponentBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return sendError(reply, 400, 'Missing player token');
+      }
+      const result = setLookingForOpponent(code.toUpperCase(), parsed.data.playerToken);
+      if ('error' in result) {
+        if (result.error === 'not_found') {
+          return sendError(reply, 404, 'Online game not found');
+        }
+        if (result.error === 'forbidden') {
+          return sendError(reply, 403, 'Only the host can post a callout');
+        }
+        // result.error === 'not_waiting'
+        return sendError(reply, 409, 'Game is not waiting for opponent');
+      }
+      return reply.send({ ok: true, expiresAt: result.expiresAt });
+    },
+  );
+
+  // GET /api/osma-liga/online-games/looking-for-opponent — active homepage callout, if any
+  app.get(
+    '/api/osma-liga/online-games/looking-for-opponent',
+    { preHandler: apiKeyAuth },
+    async (_request, reply) => {
+      const room = getActiveLookingForOpponentGame();
+      if (!room) {
+        return reply.send({ game: null });
+      }
+      let club: { name: string; shortName: string | null } | null = null;
+      if (room.homeClubId) {
+        const found = await db.osmaClub.findUnique({
+          where: { id: room.homeClubId },
+          select: { name: true, shortName: true },
+        });
+        if (found) club = found;
+      }
+      return reply.send({
+        game: {
+          code: room.code,
+          club,
+          createdAt: room.createdAt,
+          expiresAt: room.lookingForOpponentExpiresAt,
+        },
       });
     },
   );
