@@ -78,6 +78,7 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
         maxPlayers: 2,
         createdAt: room.createdAt,
         expiresAt: room.expiresAt,
+        onlineMatchId: room.onlineMatchId ?? null,
       });
     },
   );
