@@ -4,7 +4,7 @@ import { sendError } from '../../shared/errors.js';
 import { CreateMatchResultSchema, ListMatchResultsQuerySchema, DiscordUpsertSchema } from './validation.js';
 import { createMatchResult, listMatchResults, upsertDiscordUser, listClubs, getClubBySlug } from './service.js';
 import { db } from '../../db.js';
-import { calculateClubPoints } from './onlineMatchResultService.js';
+import { calculateClubPoints, getPlayerProfile } from './onlineMatchResultService.js';
 
 export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
   app.post(
@@ -216,6 +216,18 @@ export async function osmaLigaRoutes(app: FastifyInstance): Promise<void> {
         stats: { matches, wins, draws, losses, goalsFor, goalsAgainst, goalDifference: goalsFor - goalsAgainst, points },
         topPlayers,
       });
+    },
+  );
+
+  // GET /api/osma-liga/users/:userId/profile — private player profile, server-side only
+  app.get(
+    '/api/osma-liga/users/:userId/profile',
+    { preHandler: apiKeyAuth },
+    async (request, reply) => {
+      const { userId } = request.params as { userId: string };
+      const profile = await getPlayerProfile(userId);
+      if (!profile) return sendError(reply, 404, 'User not found');
+      return reply.send(profile);
     },
   );
 
