@@ -149,11 +149,11 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
       if (!room) {
         return reply.send({ game: null });
       }
-      let club: { name: string; shortName: string | null } | null = null;
+      let club: { name: string; shortName: string | null; slug: string } | null = null;
       if (room.homeClubId) {
         const found = await db.osmaClub.findUnique({
           where: { id: room.homeClubId },
-          select: { name: true, shortName: true },
+          select: { name: true, shortName: true, slug: true },
         });
         if (found) club = found;
       }

@@ -37,6 +37,24 @@ export function attachSocketIO(httpServer: http.Server): IOServer {
       roomCode = code;
       void socket.join(code);
       socket.emit('joined_game', { role: playerTeam, status: room.status });
+
+      // Training challenges have no real host client to click "Spustit zápas" —
+      // auto-start as soon as the real opponent (guest) connects.
+      // The home side then has no controller and plays passively until a
+      // training-challenge AI profile is wired into the engine (see TODO.md).
+      if (
+        room.isTrainingChallenge &&
+        playerTeam === 'guest' &&
+        room.guestToken !== null &&
+        (!room.gameState || room.gameState.status === 'waiting')
+      ) {
+        const started = startGame(code, (event, data) => {
+          io.to(code).emit(event, data);
+        });
+        if (started) {
+          io.to(code).emit('game_started', {});
+        }
+      }
     });
 
     socket.on('start_game', () => {
