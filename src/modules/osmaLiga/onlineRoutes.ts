@@ -105,6 +105,15 @@ export async function onlineRoutes(app: FastifyInstance): Promise<void> {
       const { code } = request.params as { code: string };
       const parsed = OnlineGameUserInfoSchema.safeParse(request.body ?? {});
       const userInfo = parsed.success ? parsed.data : undefined;
+
+      // Training challenge results feed into history/profile/club tables, so
+      // (unlike a casual classic-multiplayer match) joining one requires a
+      // real Discord-linked account. Classic multiplayer stays anonymous-friendly.
+      const targetRoom = getGame(code.toUpperCase());
+      if (targetRoom?.isTrainingChallenge && !userInfo?.userId) {
+        return sendError(reply, 401, 'Discord login required to join a training challenge');
+      }
+
       const resolvedClub = await resolveClub(userInfo?.clubId);
       if (resolvedClub === 'invalid') {
         return sendError(reply, 400, 'Invalid club');

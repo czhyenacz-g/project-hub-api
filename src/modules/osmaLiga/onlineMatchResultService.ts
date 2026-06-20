@@ -8,15 +8,22 @@ export function calculateClubPoints(homeScore: number, awayScore: number) {
   return { homeClubPoints: 1, awayClubPoints: 1 };
 }
 
-const HOME_TEAM_SLUG = 'nahoda-fc';
-const HOME_TEAM_NAME = 'Náhoda FC';
-const AWAY_TEAM_SLUG = 'fk-parezov';
-const AWAY_TEAM_NAME = 'FK Pařezov';
+// Fallbacks only for legacy rooms created before homeClubSlug/homeClubName existed.
+const FALLBACK_HOME_TEAM_SLUG = 'nahoda-fc';
+const FALLBACK_HOME_TEAM_NAME = 'Náhoda FC';
+const FALLBACK_AWAY_TEAM_SLUG = 'fk-parezov';
+const FALLBACK_AWAY_TEAM_NAME = 'FK Pařezov';
 
 function getMultiplayerComment(homeScore: number, awayScore: number): string {
-  if (homeScore > awayScore) return 'Náhoda FC přežila živého soupeře. To už se počítá.';
+  if (homeScore > awayScore) return 'Domácí přežili živého soupeře. To už se počítá.';
   if (awayScore > homeScore) return 'Hosté si odvážejí výhru a domácí hledají výmluvu.';
   return 'Remíza. Oba týmy tvrdí, že měly víc ze hry.';
+}
+
+function getTrainingChallengeComment(homeScore: number, awayScore: number): string {
+  if (homeScore > awayScore) return 'Tréninkový zápas. Domácí udrželi tempo až do konce.';
+  if (awayScore > homeScore) return 'Tréninkový zápas. Hosté si odvezli výhru i z přátelského utkání.';
+  return 'Tréninkový zápas skončil remízou. Nikomu to nevadilo.';
 }
 
 export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void> {
@@ -32,6 +39,17 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
     (finishedAt.getTime() - room.startedAt.getTime()) / 1000,
   );
 
+  const homeTeamSlug = room.homeClubSlug ?? FALLBACK_HOME_TEAM_SLUG;
+  const homeTeamName = room.homeClubName ?? FALLBACK_HOME_TEAM_NAME;
+  const awayTeamSlug = room.awayClubSlug ?? FALLBACK_AWAY_TEAM_SLUG;
+  const awayTeamName = room.awayClubName ?? FALLBACK_AWAY_TEAM_NAME;
+  // Training challenges get their own mode so the homepage can label them
+  // distinctly without ever exposing the word "bot" — see RecentResults.tsx.
+  const mode = room.isTrainingChallenge ? 'training_challenge' : 'multiplayer';
+  const matchComment = room.isTrainingChallenge
+    ? getTrainingChallengeComment(score.home, score.away)
+    : getMultiplayerComment(score.home, score.away);
+
   let savedId: string | null = null;
 
   await db.$transaction(async (tx) => {
@@ -39,10 +57,10 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
       data: {
         gameCode: room.code,
         status: 'finished',
-        homeTeamSlug: HOME_TEAM_SLUG,
-        homeTeamName: HOME_TEAM_NAME,
-        awayTeamSlug: AWAY_TEAM_SLUG,
-        awayTeamName: AWAY_TEAM_NAME,
+        homeTeamSlug,
+        homeTeamName,
+        awayTeamSlug,
+        awayTeamName,
         homeScore: score.home,
         awayScore: score.away,
         winnerSide,
@@ -82,15 +100,15 @@ export async function saveOnlineMatchResult(room: OnlineGameRoom): Promise<void>
 
     const publicResult = await tx.osmaMatchResult.create({
       data: {
-        homeTeamSlug: HOME_TEAM_SLUG,
-        homeTeamName: HOME_TEAM_NAME,
-        awayTeamSlug: AWAY_TEAM_SLUG,
-        awayTeamName: AWAY_TEAM_NAME,
+        homeTeamSlug,
+        homeTeamName,
+        awayTeamSlug,
+        awayTeamName,
         homeScore: score.home,
         awayScore: score.away,
-        mode: 'multiplayer',
+        mode,
         durationSeconds,
-        matchComment: getMultiplayerComment(score.home, score.away),
+        matchComment,
         playedAt: finishedAt,
         onlineMatchId: onlineMatch.id,
       },
