@@ -70,7 +70,7 @@ export async function trainingChallengeRoutes(app: FastifyInstance): Promise<voi
         });
       }
 
-      const room = createTrainingChallenge(club.id);
+      const room = createTrainingChallenge(club.id, club.slug, club.name);
       return reply.status(201).send({
         ok: true,
         status: 'created',

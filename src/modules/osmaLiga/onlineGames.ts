@@ -1,6 +1,7 @@
 import { OnlineGameState, InputState } from '../../gameEngine/types.js';
 import { createInitialState } from '../../gameEngine/createInitialState.js';
 import { tickGame } from '../../gameEngine/tick.js';
+import { computeTrainingChallengeInput } from '../../gameEngine/ai.js';
 import { MATCH_DURATION } from '../../gameEngine/constants.js';
 import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 
@@ -42,6 +43,10 @@ export type OnlineGameRoom = {
   awayUserAvatar: string | null;
   homeClubId: string | null;
   awayClubId: string | null;
+  homeClubSlug: string | null;
+  awayClubSlug: string | null;
+  homeClubName: string | null;
+  awayClubName: string | null;
   lookingForOpponent: boolean;
   lookingForOpponentAt: string | null;
   lookingForOpponentExpiresAt: string | null;
@@ -55,7 +60,14 @@ export type OnlineGameRoom = {
   opponentProfile: 'standard' | 'trainingChallenge';
 };
 
-type UserInfo = { userId?: string | null; userName?: string | null; userAvatar?: string | null; clubId?: string | null };
+type UserInfo = {
+  userId?: string | null;
+  userName?: string | null;
+  userAvatar?: string | null;
+  clubId?: string | null;
+  clubSlug?: string | null;
+  clubName?: string | null;
+};
 
 const store = new Map<string, OnlineGameRoom>();
 
@@ -115,6 +127,10 @@ export function createGame(userInfo?: UserInfo): OnlineGameRoom {
     awayUserAvatar: null,
     homeClubId: userInfo?.clubId ?? null,
     awayClubId: null,
+    homeClubSlug: userInfo?.clubSlug ?? null,
+    awayClubSlug: null,
+    homeClubName: userInfo?.clubName ?? null,
+    awayClubName: null,
     lookingForOpponent: false,
     lookingForOpponentAt: null,
     lookingForOpponentExpiresAt: null,
@@ -130,7 +146,7 @@ export function createGame(userInfo?: UserInfo): OnlineGameRoom {
 
 // Creates a room representing a fictional club's automatic training challenge.
 // No real host is connected — the room just waits for a first real player to join as guest.
-export function createTrainingChallenge(clubId: string): OnlineGameRoom {
+export function createTrainingChallenge(clubId: string, clubSlug: string, clubName: string): OnlineGameRoom {
   cleanupExpired();
   const now = new Date();
   const roomExpiresAt = new Date(now.getTime() + ONLINE_GAME_TTL_MINUTES * 60 * 1000);
@@ -157,6 +173,10 @@ export function createTrainingChallenge(clubId: string): OnlineGameRoom {
     awayUserAvatar: null,
     homeClubId: clubId,
     awayClubId: null,
+    homeClubSlug: clubSlug,
+    awayClubSlug: null,
+    homeClubName: clubName,
+    awayClubName: null,
     lookingForOpponent: false,
     lookingForOpponentAt: null,
     lookingForOpponentExpiresAt: null,
@@ -209,6 +229,8 @@ export function joinGame(code: string, userInfo?: UserInfo): { room: OnlineGameR
   room.awayUserName = userInfo?.userName ?? null;
   room.awayUserAvatar = userInfo?.userAvatar ?? null;
   room.awayClubId = userInfo?.clubId ?? null;
+  room.awayClubSlug = userInfo?.clubSlug ?? null;
+  room.awayClubName = userInfo?.clubName ?? null;
   // Opponent found — the homepage callout no longer applies
   room.lookingForOpponent = false;
   return { room, guestToken };
@@ -306,6 +328,12 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   room.gameInterval = setInterval(() => {
     if (!room.gameState) return;
 
+    // Training challenges have no real connected host — drive the home
+    // side with a simple ball-chasing AI instead of leaving it static.
+    if (room.isTrainingChallenge) {
+      room.gameState.inputs.home = computeTrainingChallengeInput(room.gameState);
+    }
+
     const prevHome = room.gameState.score.home;
     const prevAway = room.gameState.score.away;
 
@@ -319,7 +347,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
         type: 'goal',
         matchSecond,
         teamSide: 'home',
-        teamName: 'Náhoda FC',
+        teamName: room.homeClubName ?? 'Domácí',
         homeScoreAfter: room.gameState.score.home,
         awayScoreAfter: room.gameState.score.away,
         message: `Gól domácích! ${room.gameState.score.home}:${room.gameState.score.away}`,
@@ -330,7 +358,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
         type: 'goal',
         matchSecond,
         teamSide: 'away',
-        teamName: 'FK Pařezov',
+        teamName: room.awayClubName ?? 'Hosté',
         homeScoreAfter: room.gameState.score.home,
         awayScoreAfter: room.gameState.score.away,
         message: `Gól hostů! ${room.gameState.score.home}:${room.gameState.score.away}`,
@@ -339,7 +367,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
 
     if (ticksSinceSnapshot >= TICKS_PER_SNAPSHOT) {
       ticksSinceSnapshot = 0;
-      emitFn('state', buildSnapshot(room.gameState));
+      emitFn('state', buildSnapshot(room.gameState, room));
     }
 
     if (room.gameState.status === 'finished') {
@@ -363,7 +391,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   return true;
 }
 
-function buildSnapshot(state: OnlineGameState): object {
+function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
   return {
     tick: state.tick,
     status: state.status,
@@ -379,6 +407,8 @@ function buildSnapshot(state: OnlineGameState): object {
       label: p.label,
     })),
     goalMessage: state.goalMessage,
+    homeClubName: room.homeClubName,
+    awayClubName: room.awayClubName,
   };
 }
 
