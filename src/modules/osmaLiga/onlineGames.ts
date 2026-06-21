@@ -351,6 +351,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
         homeScoreAfter: room.gameState.score.home,
         awayScoreAfter: room.gameState.score.away,
         message: `Gól domácích! ${room.gameState.score.home}:${room.gameState.score.away}`,
+        metadataJson: { isOwnGoal: room.gameState.isOwnGoal },
       });
     } else if (room.gameState.score.away > prevAway) {
       const matchSecond = Math.round(MATCH_DURATION - room.gameState.timeLeftSeconds);
@@ -362,6 +363,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
         homeScoreAfter: room.gameState.score.home,
         awayScoreAfter: room.gameState.score.away,
         message: `Gól hostů! ${room.gameState.score.home}:${room.gameState.score.away}`,
+        metadataJson: { isOwnGoal: room.gameState.isOwnGoal },
       });
     }
 
@@ -407,6 +409,7 @@ function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
       label: p.label,
     })),
     goalMessage: state.goalMessage,
+    isOwnGoal: state.isOwnGoal,
     homeClubName: room.homeClubName,
     awayClubName: room.awayClubName,
   };

@@ -23,8 +23,27 @@ const GOAL_MESSAGES = [
   'Do sítě jako basa!',
 ];
 
+// Own goal — scored into the scoring team's own net by the last player who
+// touched the ball. Mirrors HOME_OWN_GOAL_MESSAGES/AWAY_OWN_GOAL_MESSAGES in
+// the client's game/updateGame.ts (bot engine).
+const HOME_OWN_GOAL_MESSAGES = [
+  'Vlastní gól domácích! To se těžko vysvětluje.',
+  'Domácí si to nakopli sami. Bohužel do vlastní sítě.',
+  'Brankář čekal střelu soupeře. Přišla od spoluhráče.',
+];
+
+const AWAY_OWN_GOAL_MESSAGES = [
+  'Vlastní gól hostů! Tohle si do statistik nikdo nepřipíše rád.',
+  'Hosté si to obstarali sami. Bohužel do vlastní branky.',
+  'Obrana hostů to vyřešila po svém. Špatně.',
+];
+
 function randomGoalMessage(): string {
   return GOAL_MESSAGES[Math.floor(Math.random() * GOAL_MESSAGES.length)];
+}
+
+function pickMessage(pool: string[]): string {
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function resetPositions(state: OnlineGameState): void {
@@ -45,6 +64,9 @@ function resetPositions(state: OnlineGameState): void {
   state.goalMessage = '';
   state.cornerTimer = 0;
   state.cornerClearCooldown = 0;
+  state.lastTouchTeam = null;
+  state.lastTouchPlayerId = null;
+  state.isOwnGoal = false;
 }
 
 function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number): void {
@@ -193,8 +215,15 @@ export function tickGame(state: OnlineGameState, dt: number): void {
     }
   }
 
-  // 7. Resolve player-ball collisions
-  resolvePlayerBallCollisions(state.players, state.ball);
+  // 7. Resolve player-ball collisions, tracking last touch for own-goal detection
+  const touchedId = resolvePlayerBallCollisions(state.players, state.ball);
+  if (touchedId !== null) {
+    const toucher = state.players.find((p) => p.id === touchedId);
+    if (toucher) {
+      state.lastTouchTeam = toucher.team;
+      state.lastTouchPlayerId = toucher.id;
+    }
+  }
 
   // 8. Update ball physics
   updateBallPhysics(state.ball, dt);
@@ -230,9 +259,24 @@ export function tickGame(state: OnlineGameState, dt: number): void {
   // 9. Check for goal
   const scorer = checkGoal(state.ball);
   if (scorer !== null) {
+    // Own goal: ball scored into the scoring team's OWN net by their last touch.
+    // Scoring stays attributed to `scorer` regardless (that's already
+    // footballingly correct) — this only changes which message is shown.
+    const isOwnGoal =
+      (scorer === 'away' && state.lastTouchTeam === 'home') ||
+      (scorer === 'home' && state.lastTouchTeam === 'away');
+
     state.score[scorer]++;
     state.goalPause = GOAL_PAUSE_DURATION;
-    state.goalMessage = randomGoalMessage();
+    state.isOwnGoal = isOwnGoal;
+
+    if (isOwnGoal && scorer === 'away') {
+      state.goalMessage = pickMessage(HOME_OWN_GOAL_MESSAGES);
+    } else if (isOwnGoal && scorer === 'home') {
+      state.goalMessage = pickMessage(AWAY_OWN_GOAL_MESSAGES);
+    } else {
+      state.goalMessage = randomGoalMessage();
+    }
   }
 
   // 10. Increment tick

@@ -41,4 +41,8 @@ export interface OnlineGameState {
   goalPause: number;
   cornerTimer: number;
   cornerClearCooldown: number;
+  // Last touch tracking — used for own goal detection (mirrors game/types.ts on the client)
+  lastTouchTeam: 'home' | 'away' | null;
+  lastTouchPlayerId: string | null;
+  isOwnGoal: boolean;
 }

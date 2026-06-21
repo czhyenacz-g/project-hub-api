@@ -13,10 +13,21 @@ function getMatchComment(homeScore: number, awayScore: number): string {
 }
 
 export async function createMatchResult(input: CreateMatchResultInput) {
+  let homeTeamSlug = HOME_TEAM_SLUG;
+  let homeTeamName = HOME_TEAM_NAME;
+
+  if (input.homeClubSlug) {
+    const club = await getClubBySlug(input.homeClubSlug);
+    if (club) {
+      homeTeamSlug = club.slug;
+      homeTeamName = club.name;
+    }
+  }
+
   return db.osmaMatchResult.create({
     data: {
-      homeTeamSlug: HOME_TEAM_SLUG,
-      homeTeamName: HOME_TEAM_NAME,
+      homeTeamSlug,
+      homeTeamName,
       awayTeamSlug: AWAY_TEAM_SLUG,
       awayTeamName: AWAY_TEAM_NAME,
       homeScore: input.homeScore,

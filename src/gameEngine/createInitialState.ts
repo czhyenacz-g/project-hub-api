@@ -39,5 +39,8 @@ export function createInitialState(): OnlineGameState {
     goalPause: 0,
     cornerTimer: 0,
     cornerClearCooldown: 0,
+    lastTouchTeam: null,
+    lastTouchPlayerId: null,
+    isOwnGoal: false,
   };
 }

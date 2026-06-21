@@ -40,8 +40,8 @@ export function attachSocketIO(httpServer: http.Server): IOServer {
 
       // Training challenges have no real host client to click "Spustit zápas" —
       // auto-start as soon as the real opponent (guest) connects.
-      // The home side then has no controller and plays passively until a
-      // training-challenge AI profile is wired into the engine (see TODO.md).
+      // The home side is then driven by computeTrainingChallengeInput()
+      // (gameEngine/ai.ts), applied per-tick inside onlineGames.ts startGame().
       if (
         room.isTrainingChallenge &&
         playerTeam === 'guest' &&
