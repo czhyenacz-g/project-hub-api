@@ -93,6 +93,7 @@ export function attachSocketIO(httpServer: http.Server): IOServer {
         left: !!inputData.left,
         right: !!inputData.right,
         kick: !!inputData.kick,
+        switchPlayer: !!inputData.switchPlayer,
       };
       updateInput(roomCode, playerTeam, clean);
     });

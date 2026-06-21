@@ -2,7 +2,7 @@ import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import { FIELD_CX, FIELD_CY, MATCH_DURATION } from './constants.js';
 
 function makeInput(): InputState {
-  return { up: false, down: false, left: false, right: false, kick: false };
+  return { up: false, down: false, left: false, right: false, kick: false, switchPlayer: false };
 }
 
 function makePlayer(
@@ -42,5 +42,9 @@ export function createInitialState(): OnlineGameState {
     lastTouchTeam: null,
     lastTouchPlayerId: null,
     isOwnGoal: false,
+    autoActivePlayerId: { home: null, away: null },
+    manualActivePlayerId: { home: null, away: null },
+    manualLockRemaining: { home: 0, away: 0 },
+    switchKeyWasDown: { home: false, away: false },
   };
 }

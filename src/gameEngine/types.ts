@@ -27,6 +27,7 @@ export interface InputState {
   left: boolean;
   right: boolean;
   kick: boolean;
+  switchPlayer: boolean;
 }
 
 export interface OnlineGameState {
@@ -45,4 +46,11 @@ export interface OnlineGameState {
   lastTouchTeam: 'home' | 'away' | null;
   lastTouchPlayerId: string | null;
   isOwnGoal: boolean;
+  // Manual active-player override (Q / PŘEP.), per team — mirrors the bot
+  // engine's game/types.ts. Keyed by engine team ('home'/'away'), not by
+  // connection role ('home'/'guest').
+  autoActivePlayerId: { home: string | null; away: string | null };
+  manualActivePlayerId: { home: string | null; away: string | null };
+  manualLockRemaining: { home: number; away: number };
+  switchKeyWasDown: { home: boolean; away: boolean };
 }

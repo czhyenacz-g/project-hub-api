@@ -5,7 +5,7 @@ function dist(x1: number, y1: number, x2: number, y2: number): number {
   return Math.hypot(x1 - x2, y1 - y2);
 }
 
-const NEUTRAL_INPUT: InputState = { up: false, down: false, left: false, right: false, kick: false };
+const NEUTRAL_INPUT: InputState = { up: false, down: false, left: false, right: false, kick: false, switchPlayer: false };
 
 // Drives the "home" team for an automatic training challenge — a fictional
 // club with no real connected host. Chases the ball with whichever player

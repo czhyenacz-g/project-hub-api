@@ -2,7 +2,8 @@ import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
-  RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, GOAL_PAUSE_DURATION, BALL_RADIUS,
+  RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN,
+  MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
@@ -143,29 +144,70 @@ function clampToField(v: number, lo: number, hi: number): number {
 }
 
 // Mirrors the bot engine's active-player hysteresis (game/updateGame.ts):
-// the current active player keeps the role until a teammate is clearly
-// closer to the ball by ACTIVE_PLAYER_SWITCH_MARGIN. Without this, a ball
-// sitting between two similarly-distanced players makes "active" flicker
-// between them every tick. `p.active` from the previous tick is reused as
-// the memory of who currently holds the role — no extra state needed.
-function findActivePlayer(players: OnlinePlayer[], team: 'home' | 'away', ball: { x: number; y: number }): OnlinePlayer | null {
+// the current automatic pick keeps the role until a teammate is clearly
+// closer to the ball by ACTIVE_PLAYER_SWITCH_MARGIN. Tracked via
+// state.autoActivePlayerId rather than p.active, so it keeps running in the
+// background while a manual override (see resolveActivePlayer) is active.
+function findAutoActivePlayer(state: OnlineGameState, team: 'home' | 'away'): OnlinePlayer | null {
   let nearest: OnlinePlayer | null = null;
   let nearestDist = Infinity;
-  for (const p of players) {
+  for (const p of state.players) {
     if (p.team !== team) continue;
-    const d = dist(p.x, p.y, ball.x, ball.y);
+    const d = dist(p.x, p.y, state.ball.x, state.ball.y);
     if (d < nearestDist) {
       nearestDist = d;
       nearest = p;
     }
   }
 
-  const currentActive = players.find((p) => p.team === team && p.active) ?? null;
+  const currentId = state.autoActivePlayerId[team];
+  const currentActive = currentId ? state.players.find((p) => p.team === team && p.id === currentId) ?? null : null;
   if (!currentActive || !nearest) return nearest;
 
-  const currentDist = dist(currentActive.x, currentActive.y, ball.x, ball.y);
+  const currentDist = dist(currentActive.x, currentActive.y, state.ball.x, state.ball.y);
   const shouldSwitch = nearest.id !== currentActive.id && nearestDist + ACTIVE_PLAYER_SWITCH_MARGIN < currentDist;
   return shouldSwitch ? nearest : currentActive;
+}
+
+// Manual override (Q / PŘEP., see InputState.switchPlayer). Server
+// authoritative: the caller passes `input` for the team the connection
+// owns (mapped by socket/team at join time), so a client can never switch
+// the opponent's players. Edge-detected via switchKeyWasDown so holding the
+// key only triggers a single switch; another press during the lock cycles
+// to the next teammate and renews it.
+function resolveActivePlayer(
+  state: OnlineGameState,
+  team: 'home' | 'away',
+  input: InputState,
+  dt: number,
+): OnlinePlayer | null {
+  const teamPlayers = state.players.filter((p) => p.team === team);
+  if (teamPlayers.length === 0) return null;
+
+  const auto = findAutoActivePlayer(state, team);
+  state.autoActivePlayerId[team] = auto ? auto.id : null;
+
+  const order = teamPlayers.map((p) => p.id);
+  const switchEdge = input.switchPlayer && !state.switchKeyWasDown[team];
+  state.switchKeyWasDown[team] = input.switchPlayer;
+
+  if (state.manualLockRemaining[team] > 0) {
+    state.manualLockRemaining[team] = Math.max(0, state.manualLockRemaining[team] - dt);
+    if (switchEdge) {
+      const curId = state.manualActivePlayerId[team] ?? order[0];
+      state.manualActivePlayerId[team] = order[(order.indexOf(curId) + 1) % order.length];
+      state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+    }
+  } else if (switchEdge && auto) {
+    state.manualActivePlayerId[team] = order[(order.indexOf(auto.id) + 1) % order.length];
+    state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+  }
+
+  if (state.manualLockRemaining[team] > 0 && state.manualActivePlayerId[team]) {
+    const manualPlayer = teamPlayers.find((p) => p.id === state.manualActivePlayerId[team]);
+    if (manualPlayer) return manualPlayer;
+  }
+  return auto;
 }
 
 export function tickGame(
@@ -195,7 +237,7 @@ export function tickGame(
   const teams: Array<'home' | 'away'> = ['home', 'away'];
   for (const team of teams) {
     const input: InputState = team === 'home' ? state.inputs.home : state.inputs.guest;
-    const active = findActivePlayer(state.players, team, state.ball);
+    const active = resolveActivePlayer(state, team, input, dt);
     const teamConfig: TeamBehaviorConfig = behaviorConfig[team];
     const supportTargets = active
       ? computeTeamSupportInputs(state.players, team, active, state.ball, teamConfig)
