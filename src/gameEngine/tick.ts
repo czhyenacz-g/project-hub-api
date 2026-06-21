@@ -118,6 +118,30 @@ function moveTowardSupportTarget(
   player.y += (dy / d) * step;
 }
 
+// Hard positional correction: support targets only steer movement, but a
+// faster active player can still walk into a slower-moving teammate before
+// it reacts. This guarantees the configured minimum distance after every
+// tick, regardless of relative speeds — applies the same way to home and
+// away.
+function enforceMinDistance(player: OnlinePlayer, fromX: number, fromY: number, minDist: number): void {
+  const dx = player.x - fromX;
+  const dy = player.y - fromY;
+  const d = Math.hypot(dx, dy);
+  if (d === 0) {
+    player.y = clampToField(fromY + minDist, FIELD_T, FIELD_B);
+    return;
+  }
+  if (d < minDist) {
+    const scale = minDist / d;
+    player.x = clampToField(fromX + dx * scale, FIELD_L, FIELD_R);
+    player.y = clampToField(fromY + dy * scale, FIELD_T, FIELD_B);
+  }
+}
+
+function clampToField(v: number, lo: number, hi: number): number {
+  return Math.max(lo + 25, Math.min(hi - 25, v));
+}
+
 function findActivePlayer(players: OnlinePlayer[], team: 'home' | 'away', ball: { x: number; y: number }): OnlinePlayer | null {
   let closest: OnlinePlayer | null = null;
   let closestDist = Infinity;
@@ -256,6 +280,20 @@ export function tickGame(
             p.kickCooldown = KICK_COOLDOWN;
           }
         }
+      }
+    }
+
+    // Hard spacing pass: re-applies the configured minimum distance after
+    // movement, so support teammates can't be walked into by a faster
+    // active player or end up stacked on each other.
+    if (active && teamConfig.teammateSupportMode !== 'none') {
+      const teammates = state.players.filter((p) => p.team === team && p.id !== active.id);
+      for (const p of teammates) {
+        enforceMinDistance(p, active.x, active.y, teamConfig.supportSpacing);
+      }
+      if (teammates.length === 2) {
+        const [t1, t2] = teammates;
+        enforceMinDistance(t2, t1.x, t1.y, teamConfig.supportSpacing);
       }
     }
   }
