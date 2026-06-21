@@ -27,7 +27,7 @@ export const MULTIPLAYER_TEAM_BEHAVIOR: TeamBehaviorConfig = {
   teammateSupportMode: 'basic',
   supportCanShoot: false,
   supportChaseWeight: 0.35,
-  supportSpacing: 70,
+  supportSpacing: 110,
 };
 
 export const TRAINING_CHALLENGE_GUEST_BEHAVIOR: TeamBehaviorConfig = {
@@ -39,7 +39,7 @@ export const TRAINING_CHALLENGE_HOME_BEHAVIOR: TeamBehaviorConfig = {
   teammateSupportMode: 'aggressive',
   supportCanShoot: true,
   supportChaseWeight: 0.7,
-  supportSpacing: 50,
+  supportSpacing: 90,
 };
 
 export const DEFAULT_BEHAVIOR_CONFIG: GameBehaviorConfig = {
@@ -54,21 +54,43 @@ export const TRAINING_CHALLENGE_BEHAVIOR_CONFIG: GameBehaviorConfig = {
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// Anchor prefers defending over shadowing the ball: it sits deep near its
+// own goal and only partly leans toward the ball's height, so it reads as
+// "the one who stays back" rather than another ball-chaser.
 function computeAnchorTarget(team: 'home' | 'away', ball: OnlineBall): { x: number; y: number } {
   const fieldW = FIELD_R - FIELD_L;
   const attackDir = team === 'home' ? 1 : -1;
   const ownGoalX = team === 'home' ? FIELD_L : FIELD_R;
-  const anchorX = ownGoalX + attackDir * fieldW * 0.25;
+  const anchorX = ownGoalX + attackDir * fieldW * 0.18;
+  const ballLeanY = FIELD_CY + (ball.y - FIELD_CY) * 0.5;
   return {
     x: clamp(anchorX, FIELD_L + 40, FIELD_R - 40),
-    y: clamp(ball.y, FIELD_T + 50, FIELD_B - 50),
+    y: clamp(ballLeanY, FIELD_T + 50, FIELD_B - 50),
   };
+}
+
+// Pushes `target` directly away from `obstacle` until at least `minDist`
+// apart, along the line connecting them (falls back to a fixed direction
+// if they land exactly on top of each other).
+function pushApart(
+  target: { x: number; y: number },
+  obstacle: { x: number; y: number },
+  minDist: number,
+): { x: number; y: number } {
+  const dx = target.x - obstacle.x;
+  const dy = target.y - obstacle.y;
+  const d = Math.hypot(dx, dy);
+  if (d === 0) return { x: obstacle.x, y: obstacle.y + minDist };
+  if (d >= minDist) return target;
+  const scale = minDist / d;
+  return { x: obstacle.x + dx * scale, y: obstacle.y + dy * scale };
 }
 
 function computeRunnerTarget(
   team: 'home' | 'away',
   ball: OnlineBall,
   active: OnlinePlayer,
+  anchorTarget: { x: number; y: number },
   config: TeamBehaviorConfig,
 ): { x: number; y: number } {
   const fieldW = FIELD_R - FIELD_L;
@@ -77,15 +99,17 @@ function computeRunnerTarget(
   const vertOffset = ball.y < FIELD_CY ? 80 : -80;
 
   const runX = clamp(ball.x + leadOffset, FIELD_L + fieldW * 0.3, FIELD_R - fieldW * 0.3);
-  let runY = clamp(ball.y + vertOffset, FIELD_T + 50, FIELD_B - 50);
+  const runY = clamp(ball.y + vertOffset, FIELD_T + 50, FIELD_B - 50);
 
-  // Don't crowd the active player — nudge further away if too close.
-  const tooClose = Math.hypot(runX - active.x, runY - active.y) < config.supportSpacing;
-  if (tooClose) {
-    runY = clamp(runY + (vertOffset > 0 ? -40 : 40), FIELD_T + 50, FIELD_B - 50);
-  }
+  // Keep distance from both the active player and the anchor — support
+  // shouldn't bunch up with any other teammate, regardless of axis.
+  let target = pushApart({ x: runX, y: runY }, { x: active.x, y: active.y }, config.supportSpacing);
+  target = pushApart(target, anchorTarget, config.supportSpacing);
 
-  return { x: runX, y: runY };
+  return {
+    x: clamp(target.x, FIELD_L + 30, FIELD_R - 30),
+    y: clamp(target.y, FIELD_T + 30, FIELD_B - 30),
+  };
 }
 
 // For each non-active teammate, computes a support target position: one
@@ -111,8 +135,14 @@ export function computeTeamSupportInputs(
     (a, b) => Math.abs(a.x - ownGoalX) - Math.abs(b.x - ownGoalX),
   );
 
-  if (anchor) targets.set(anchor.id, computeAnchorTarget(team, ball));
-  if (runner) targets.set(runner.id, computeRunnerTarget(team, ball, active, config));
+  const anchorTarget = anchor ? computeAnchorTarget(team, ball) : null;
+  if (anchor && anchorTarget) targets.set(anchor.id, anchorTarget);
+  if (runner) {
+    targets.set(
+      runner.id,
+      computeRunnerTarget(team, ball, active, anchorTarget ?? { x: active.x, y: active.y }, config),
+    );
+  }
 
   return targets;
 }
