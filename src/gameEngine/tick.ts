@@ -2,7 +2,7 @@ import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
-  RETURN_SPEED, GOAL_PAUSE_DURATION, BALL_RADIUS,
+  RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
@@ -11,6 +11,10 @@ import {
   dist, normalize,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
 } from './physics.js';
+import {
+  GameBehaviorConfig, TeamBehaviorConfig, DEFAULT_BEHAVIOR_CONFIG,
+  computeTeamSupportInputs,
+} from './teamBehavior.js';
 
 const GOAL_MESSAGES = [
   'Hlavní věc je, že to padlo!',
@@ -100,6 +104,20 @@ function returnToBase(player: OnlinePlayer, dt: number): void {
   player.y += (dy / d) * step;
 }
 
+function moveTowardSupportTarget(
+  player: OnlinePlayer,
+  target: { x: number; y: number },
+  dt: number,
+): void {
+  const dx = target.x - player.x;
+  const dy = target.y - player.y;
+  const d = Math.sqrt(dx * dx + dy * dy);
+  if (d < 2) return;
+  const step = Math.min(SUPPORT_PLAYER_SPEED * dt, d);
+  player.x += (dx / d) * step;
+  player.y += (dy / d) * step;
+}
+
 function findActivePlayer(players: OnlinePlayer[], team: 'home' | 'away', ball: { x: number; y: number }): OnlinePlayer | null {
   let closest: OnlinePlayer | null = null;
   let closestDist = Infinity;
@@ -114,7 +132,11 @@ function findActivePlayer(players: OnlinePlayer[], team: 'home' | 'away', ball: 
   return closest;
 }
 
-export function tickGame(state: OnlineGameState, dt: number): void {
+export function tickGame(
+  state: OnlineGameState,
+  dt: number,
+  behaviorConfig: GameBehaviorConfig = DEFAULT_BEHAVIOR_CONFIG,
+): void {
   // 1. Handle goal pause
   if (state.goalPause > 0) {
     state.goalPause -= dt;
@@ -138,6 +160,10 @@ export function tickGame(state: OnlineGameState, dt: number): void {
   for (const team of teams) {
     const input: InputState = team === 'home' ? state.inputs.home : state.inputs.guest;
     const active = findActivePlayer(state.players, team, state.ball);
+    const teamConfig: TeamBehaviorConfig = behaviorConfig[team];
+    const supportTargets = active
+      ? computeTeamSupportInputs(state.players, team, active, state.ball, teamConfig)
+      : new Map<string, { x: number; y: number }>();
 
     for (const p of state.players) {
       if (p.team !== team) continue;
@@ -205,11 +231,30 @@ export function tickGame(state: OnlineGameState, dt: number): void {
           }
         }
       } else {
-        returnToBase(p, dt);
+        const supportTarget = supportTargets.get(p.id);
+        if (supportTarget) {
+          moveTowardSupportTarget(p, supportTarget, dt);
+        } else {
+          returnToBase(p, dt);
+        }
+
         // reduce cooldown for inactive players too
         if (p.kickCooldown > 0) {
           p.kickCooldown -= dt;
           if (p.kickCooldown < 0) p.kickCooldown = 0;
+        }
+
+        // Conservative: support teammates only nudge the ball passively via
+        // collisions (physics.ts) unless the mode explicitly allows shooting
+        // (training challenge AI support only — never human multiplayer teams).
+        if (supportTarget && teamConfig.supportCanShoot && p.kickCooldown <= 0) {
+          const d = dist(p.x, p.y, state.ball.x, state.ball.y);
+          if (d <= KICK_RANGE) {
+            const dir = team === 'home' ? 1 : -1;
+            state.ball.vx += dir * SUPPORT_KICK_FORCE;
+            state.ball.vy += (Math.random() - 0.5) * 60;
+            p.kickCooldown = KICK_COOLDOWN;
+          }
         }
       }
     }

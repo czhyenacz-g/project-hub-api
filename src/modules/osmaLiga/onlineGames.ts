@@ -3,6 +3,7 @@ import { createInitialState } from '../../gameEngine/createInitialState.js';
 import { tickGame } from '../../gameEngine/tick.js';
 import { computeTrainingChallengeInput } from '../../gameEngine/ai.js';
 import { MATCH_DURATION } from '../../gameEngine/constants.js';
+import { DEFAULT_BEHAVIOR_CONFIG, TRAINING_CHALLENGE_BEHAVIOR_CONFIG } from '../../gameEngine/teamBehavior.js';
 import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 
 export const ONLINE_GAME_TTL_MINUTES = 30;
@@ -337,7 +338,10 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
     const prevHome = room.gameState.score.home;
     const prevAway = room.gameState.score.away;
 
-    tickGame(room.gameState, DT);
+    const behaviorConfig = room.isTrainingChallenge
+      ? TRAINING_CHALLENGE_BEHAVIOR_CONFIG
+      : DEFAULT_BEHAVIOR_CONFIG;
+    tickGame(room.gameState, DT, behaviorConfig);
     ticksSinceSnapshot++;
 
     // Detect goals by score diff
