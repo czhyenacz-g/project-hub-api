@@ -19,6 +19,7 @@ export const BUMP_FORCE = 110;
 export const RETURN_SPEED = 115;
 export const SUPPORT_PLAYER_SPEED = 120;
 export const SUPPORT_KICK_FORCE = 320;
+export const ACTIVE_PLAYER_SWITCH_MARGIN = 18;
 export const BALL_MAX_SPEED = 800;
 export const MATCH_DURATION = 90;
 export const GOAL_PAUSE_DURATION = 2.5;

@@ -2,7 +2,7 @@ import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
-  RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, GOAL_PAUSE_DURATION, BALL_RADIUS,
+  RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
@@ -142,18 +142,30 @@ function clampToField(v: number, lo: number, hi: number): number {
   return Math.max(lo + 25, Math.min(hi - 25, v));
 }
 
+// Mirrors the bot engine's active-player hysteresis (game/updateGame.ts):
+// the current active player keeps the role until a teammate is clearly
+// closer to the ball by ACTIVE_PLAYER_SWITCH_MARGIN. Without this, a ball
+// sitting between two similarly-distanced players makes "active" flicker
+// between them every tick. `p.active` from the previous tick is reused as
+// the memory of who currently holds the role — no extra state needed.
 function findActivePlayer(players: OnlinePlayer[], team: 'home' | 'away', ball: { x: number; y: number }): OnlinePlayer | null {
-  let closest: OnlinePlayer | null = null;
-  let closestDist = Infinity;
+  let nearest: OnlinePlayer | null = null;
+  let nearestDist = Infinity;
   for (const p of players) {
     if (p.team !== team) continue;
     const d = dist(p.x, p.y, ball.x, ball.y);
-    if (d < closestDist) {
-      closestDist = d;
-      closest = p;
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = p;
     }
   }
-  return closest;
+
+  const currentActive = players.find((p) => p.team === team && p.active) ?? null;
+  if (!currentActive || !nearest) return nearest;
+
+  const currentDist = dist(currentActive.x, currentActive.y, ball.x, ball.y);
+  const shouldSwitch = nearest.id !== currentActive.id && nearestDist + ACTIVE_PLAYER_SWITCH_MARGIN < currentDist;
+  return shouldSwitch ? nearest : currentActive;
 }
 
 export function tickGame(
