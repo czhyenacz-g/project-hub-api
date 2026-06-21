@@ -16,6 +16,10 @@ import {
   GameBehaviorConfig, TeamBehaviorConfig, DEFAULT_BEHAVIOR_CONFIG,
   computeTeamSupportInputs,
 } from './teamBehavior.js';
+import {
+  TemporaryRemovalConfig, DEFAULT_TEMPORARY_REMOVAL_CONFIG,
+  updateTemporaryRemovals, getRemovedPlayerIds,
+} from './temporaryRemoval.js';
 
 const GOAL_MESSAGES = [
   'Hlavní věc je, že to padlo!',
@@ -52,8 +56,12 @@ function pickMessage(pool: string[]): string {
 }
 
 function resetPositions(state: OnlineGameState): void {
-  // Reset players to base positions
+  // Reset players to base positions — except players currently mid-removal
+  // (leaving/bench/returning), who stay put; yanking them back onto the
+  // pitch on a goal reset would bypass their bench timer.
+  const removedIds = getRemovedPlayerIds(state);
   for (const p of state.players) {
+    if (removedIds.has(p.id)) continue;
     p.x = p.baseX;
     p.y = p.baseY;
     p.vx = 0;
@@ -148,11 +156,11 @@ function clampToField(v: number, lo: number, hi: number): number {
 // closer to the ball by ACTIVE_PLAYER_SWITCH_MARGIN. Tracked via
 // state.autoActivePlayerId rather than p.active, so it keeps running in the
 // background while a manual override (see resolveActivePlayer) is active.
-function findAutoActivePlayer(state: OnlineGameState, team: 'home' | 'away'): OnlinePlayer | null {
+function findAutoActivePlayer(state: OnlineGameState, team: 'home' | 'away', removedIds: Set<string>): OnlinePlayer | null {
   let nearest: OnlinePlayer | null = null;
   let nearestDist = Infinity;
   for (const p of state.players) {
-    if (p.team !== team) continue;
+    if (p.team !== team || removedIds.has(p.id)) continue;
     const d = dist(p.x, p.y, state.ball.x, state.ball.y);
     if (d < nearestDist) {
       nearestDist = d;
@@ -161,7 +169,9 @@ function findAutoActivePlayer(state: OnlineGameState, team: 'home' | 'away'): On
   }
 
   const currentId = state.autoActivePlayerId[team];
-  const currentActive = currentId ? state.players.find((p) => p.team === team && p.id === currentId) ?? null : null;
+  const currentActive = currentId && !removedIds.has(currentId)
+    ? state.players.find((p) => p.team === team && p.id === currentId) ?? null
+    : null;
   if (!currentActive || !nearest) return nearest;
 
   const currentDist = dist(currentActive.x, currentActive.y, state.ball.x, state.ball.y);
@@ -180,11 +190,20 @@ function resolveActivePlayer(
   team: 'home' | 'away',
   input: InputState,
   dt: number,
+  removedIds: Set<string>,
 ): OnlinePlayer | null {
-  const teamPlayers = state.players.filter((p) => p.team === team);
+  // A manual pick that became temporarily removed (e.g. random substitution
+  // mid-lock) immediately loses the override — automatic selection takes
+  // back over rather than waiting out the rest of the 3s lock.
+  if (state.manualActivePlayerId[team] && removedIds.has(state.manualActivePlayerId[team]!)) {
+    state.manualActivePlayerId[team] = null;
+    state.manualLockRemaining[team] = 0;
+  }
+
+  const teamPlayers = state.players.filter((p) => p.team === team && !removedIds.has(p.id));
   if (teamPlayers.length === 0) return null;
 
-  const auto = findAutoActivePlayer(state, team);
+  const auto = findAutoActivePlayer(state, team, removedIds);
   state.autoActivePlayerId[team] = auto ? auto.id : null;
 
   const order = teamPlayers.map((p) => p.id);
@@ -214,6 +233,7 @@ export function tickGame(
   state: OnlineGameState,
   dt: number,
   behaviorConfig: GameBehaviorConfig = DEFAULT_BEHAVIOR_CONFIG,
+  temporaryRemovalConfig: TemporaryRemovalConfig = DEFAULT_TEMPORARY_REMOVAL_CONFIG,
 ): void {
   // 1. Handle goal pause
   if (state.goalPause > 0) {
@@ -233,18 +253,32 @@ export function tickGame(
     return;
   }
 
+  // 2b. Temporary removals (MVP: random substitution) — server authoritative,
+  // run before active-player resolution so a freshly removed player is
+  // excluded from selection in the same tick it leaves.
+  updateTemporaryRemovals(state, dt, temporaryRemovalConfig);
+  const removedIds = getRemovedPlayerIds(state);
+
   // 3 & 4. Move active player per team, return others to base
   const teams: Array<'home' | 'away'> = ['home', 'away'];
   for (const team of teams) {
     const input: InputState = team === 'home' ? state.inputs.home : state.inputs.guest;
-    const active = resolveActivePlayer(state, team, input, dt);
+    const active = resolveActivePlayer(state, team, input, dt, removedIds);
     const teamConfig: TeamBehaviorConfig = behaviorConfig[team];
     const supportTargets = active
-      ? computeTeamSupportInputs(state.players, team, active, state.ball, teamConfig)
+      ? computeTeamSupportInputs(
+          state.players.filter((p) => !removedIds.has(p.id)), team, active, state.ball, teamConfig,
+        )
       : new Map<string, { x: number; y: number }>();
 
     for (const p of state.players) {
       if (p.team !== team) continue;
+      if (removedIds.has(p.id)) {
+        // Movement while leaving/on the bench/returning is handled entirely
+        // by updateTemporaryRemovals above — not eligible as active or support.
+        p.active = false;
+        continue;
+      }
       p.active = p === active;
 
       if (p === active) {
@@ -341,7 +375,7 @@ export function tickGame(
     // movement, so support teammates can't be walked into by a faster
     // active player or end up stacked on each other.
     if (active && teamConfig.teammateSupportMode !== 'none') {
-      const teammates = state.players.filter((p) => p.team === team && p.id !== active.id);
+      const teammates = state.players.filter((p) => p.team === team && p.id !== active.id && !removedIds.has(p.id));
       for (const p of teammates) {
         enforceMinDistance(p, active.x, active.y, teamConfig.supportSpacing);
       }
@@ -353,7 +387,10 @@ export function tickGame(
   }
 
   // 7. Resolve player-ball collisions, tracking last touch for own-goal detection
-  const touchedId = resolvePlayerBallCollisions(state.players, state.ball);
+  // Players currently leaving/on the bench/returning don't physically interact with the ball.
+  const touchedId = resolvePlayerBallCollisions(
+    state.players.filter((p) => !removedIds.has(p.id)), state.ball,
+  );
   if (touchedId !== null) {
     const toucher = state.players.find((p) => p.id === touchedId);
     if (toucher) {

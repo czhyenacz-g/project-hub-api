@@ -398,6 +398,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
 }
 
 function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
+  const removedIds = new Set(state.temporaryRemovals.map((r) => r.playerId));
   return {
     tick: state.tick,
     status: state.status,
@@ -411,6 +412,7 @@ function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
       y: p.y,
       active: p.active,
       label: p.label,
+      removed: removedIds.has(p.id),
     })),
     goalMessage: state.goalMessage,
     isOwnGoal: state.isOwnGoal,

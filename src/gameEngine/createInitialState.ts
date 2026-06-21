@@ -1,5 +1,6 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import { FIELD_CX, FIELD_CY, MATCH_DURATION } from './constants.js';
+import { DEFAULT_TEMPORARY_REMOVAL_CONFIG, TemporaryRemovalConfig, pickRandomTriggerSecond } from './temporaryRemoval.js';
 
 function makeInput(): InputState {
   return { up: false, down: false, left: false, right: false, kick: false, switchPlayer: false };
@@ -15,7 +16,9 @@ function makePlayer(
   return { id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false };
 }
 
-export function createInitialState(): OnlineGameState {
+export function createInitialState(
+  temporaryRemovalConfig: TemporaryRemovalConfig = DEFAULT_TEMPORARY_REMOVAL_CONFIG,
+): OnlineGameState {
   const players: OnlinePlayer[] = [
     // Home team (left half)
     makePlayer('h1', 'home', 200, 180, 'H1'),
@@ -46,5 +49,11 @@ export function createInitialState(): OnlineGameState {
     manualActivePlayerId: { home: null, away: null },
     manualLockRemaining: { home: 0, away: 0 },
     switchKeyWasDown: { home: false, away: false },
+    temporaryRemovals: [],
+    randomSubstitutionTriggerSecond: {
+      home: pickRandomTriggerSecond(temporaryRemovalConfig),
+      away: pickRandomTriggerSecond(temporaryRemovalConfig),
+    },
+    randomSubstitutionTriggered: { home: false, away: false },
   };
 }

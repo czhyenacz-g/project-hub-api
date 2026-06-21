@@ -30,6 +30,23 @@ export interface InputState {
   switchPlayer: boolean;
 }
 
+// Generic temporary-removal state — MVP is "randomSubstitution" only, but the
+// shape is reused later for stamina/cards/injuries (see temporaryRemoval.ts).
+export type TemporaryRemovalReason = 'randomSubstitution' | 'stamina' | 'card' | 'injury' | 'event';
+export type TemporaryRemovalPhase = 'leaving' | 'bench' | 'returning';
+
+export interface TemporaryPlayerRemoval {
+  playerId: string;
+  team: 'home' | 'away';
+  reason: TemporaryRemovalReason;
+  phase: TemporaryRemovalPhase;
+  // Counts down only during the 'bench' phase.
+  remainingSeconds: number;
+  benchDurationSeconds: number;
+  // Recomputed (with occupancy avoidance) right when the bench phase ends.
+  returnPosition: { x: number; y: number };
+}
+
 export interface OnlineGameState {
   status: 'waiting' | 'playing' | 'finished';
   tick: number;
@@ -53,4 +70,8 @@ export interface OnlineGameState {
   manualActivePlayerId: { home: string | null; away: string | null };
   manualLockRemaining: { home: number; away: number };
   switchKeyWasDown: { home: boolean; away: boolean };
+  // Temporary player removal (see temporaryRemoval.ts) — MVP: random substitution.
+  temporaryRemovals: TemporaryPlayerRemoval[];
+  randomSubstitutionTriggerSecond: { home: number; away: number };
+  randomSubstitutionTriggered: { home: boolean; away: boolean };
 }
