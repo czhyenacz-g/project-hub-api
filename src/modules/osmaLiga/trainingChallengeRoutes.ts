@@ -38,13 +38,17 @@ export async function trainingChallengeRoutes(app: FastifyInstance): Promise<voi
   app.post(
     '/internal/training-challenges/generate',
     { preHandler: trainingCronAuth },
-    async (_request, reply) => {
+    async (request, reply) => {
       // Re-check right before creating to keep the race window as small as possible —
       // this process is single-threaded/in-memory, so this is a best-effort guard,
       // not a DB-backed lock. See report for the documented limitation.
       const existing = getActiveTrainingChallenge();
       if (existing) {
         const club = await loadClubInfo(existing.trainingChallengeClubId);
+        request.log.info(
+          { event: 'training_challenge_generate', status: 'skipped', reason: 'active_training_challenge_exists', club: club?.slug ?? null, gameCode: existing.code },
+          'Training challenge generate: skipped (already active)',
+        );
         return reply.send({
           ok: true,
           status: 'skipped',
@@ -55,6 +59,7 @@ export async function trainingChallengeRoutes(app: FastifyInstance): Promise<voi
 
       const club = await pickRandomActiveClub();
       if (!club) {
+        request.log.error({ event: 'training_challenge_generate', status: 'error', reason: 'no_active_clubs' }, 'Training challenge generate: no active clubs available');
         return sendError(reply, 500, 'No active clubs available');
       }
 
@@ -62,6 +67,10 @@ export async function trainingChallengeRoutes(app: FastifyInstance): Promise<voi
       const stillNone = getActiveTrainingChallenge();
       if (stillNone) {
         const existingClub = await loadClubInfo(stillNone.trainingChallengeClubId);
+        request.log.info(
+          { event: 'training_challenge_generate', status: 'skipped', reason: 'active_training_challenge_exists', club: existingClub?.slug ?? null, gameCode: stillNone.code },
+          'Training challenge generate: skipped (already active)',
+        );
         return reply.send({
           ok: true,
           status: 'skipped',
@@ -71,6 +80,10 @@ export async function trainingChallengeRoutes(app: FastifyInstance): Promise<voi
       }
 
       const room = createTrainingChallenge(club.id, club.slug, club.name);
+      request.log.info(
+        { event: 'training_challenge_generate', status: 'created', club: club.slug, clubName: club.name, gameCode: room.code, expiresAt: room.trainingChallengeExpiresAt },
+        `Training challenge generate: created for ${club.name}`,
+      );
       return reply.status(201).send({
         ok: true,
         status: 'created',
