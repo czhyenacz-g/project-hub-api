@@ -22,7 +22,7 @@ export const SUPPORT_KICK_FORCE = 320;
 export const ACTIVE_PLAYER_SWITCH_MARGIN = 18;
 // Manual active-player switch (Q / PŘEP.) — mirrors the bot engine's
 // MANUAL_SWITCH_LOCK_DURATION in game/constants.ts.
-export const MANUAL_SWITCH_LOCK_DURATION = 3;
+export const MANUAL_SWITCH_LOCK_DURATION = 2;
 export const BALL_MAX_SPEED = 800;
 export const MATCH_DURATION = 90;
 export const GOAL_PAUSE_DURATION = 2.5;

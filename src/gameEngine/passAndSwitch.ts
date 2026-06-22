@@ -25,7 +25,7 @@ export const DEFAULT_PASS_AND_SWITCH_CONFIG: PassAndSwitchConfig = {
   accuracy: 0.85,
   minForce: 320,
   maxForce: 520,
-  manualLockSeconds: 3,
+  manualLockSeconds: 2,
 };
 
 const MAX_ERROR_ANGLE_RAD = (30 * Math.PI) / 180;
