@@ -20,6 +20,10 @@ import {
   TemporaryRemovalConfig, DEFAULT_TEMPORARY_REMOVAL_CONFIG,
   updateTemporaryRemovals, getRemovedPlayerIds,
 } from './temporaryRemoval.js';
+import {
+  PassAndSwitchConfig, DEFAULT_PASS_AND_SWITCH_CONFIG,
+  hasBallControl, findBestPassTarget, computePassVelocity,
+} from './passAndSwitch.js';
 
 const GOAL_MESSAGES = [
   'Hlavní věc je, že to padlo!',
@@ -191,6 +195,7 @@ function resolveActivePlayer(
   input: InputState,
   dt: number,
   removedIds: Set<string>,
+  passAndSwitchConfig: PassAndSwitchConfig,
 ): OnlinePlayer | null {
   // A manual pick that became temporarily removed (e.g. random substitution
   // mid-lock) immediately loses the override — automatic selection takes
@@ -210,16 +215,42 @@ function resolveActivePlayer(
   const switchEdge = input.switchPlayer && !state.switchKeyWasDown[team];
   state.switchKeyWasDown[team] = input.switchPlayer;
 
-  if (state.manualLockRemaining[team] > 0) {
-    state.manualLockRemaining[team] = Math.max(0, state.manualLockRemaining[team] - dt);
-    if (switchEdge) {
+  // Whoever currently holds the role (before this tick's switch decision) —
+  // the relevant "does this player have the ball" check is about them, not
+  // about whichever player the switch eventually lands on.
+  const previousManualPlayer = state.manualLockRemaining[team] > 0 && state.manualActivePlayerId[team]
+    ? teamPlayers.find((p) => p.id === state.manualActivePlayerId[team])
+    : undefined;
+  const previousActive = previousManualPlayer ?? auto;
+
+  if (switchEdge && previousActive) {
+    // Q/PŘEP. with the ball under control passes to the best teammate and
+    // switches onto them instead of a plain cycle. Server authoritative —
+    // only ever evaluated for the team `input` belongs to (see tickGame).
+    const opponentTeam: 'home' | 'away' = team === 'home' ? 'away' : 'home';
+    const opponents = state.players.filter((p) => p.team === opponentTeam && !removedIds.has(p.id));
+    const canPass = passAndSwitchConfig.enabled && hasBallControl(previousActive, state.ball, passAndSwitchConfig);
+    const passTarget = canPass ? findBestPassTarget(previousActive, teamPlayers, opponents) : null;
+
+    if (passTarget) {
+      const passVel = computePassVelocity(previousActive, passTarget, passAndSwitchConfig);
+      state.ball.vx += passVel.x;
+      state.ball.vy += passVel.y;
+      previousActive.kickCooldown = KICK_COOLDOWN;
+      state.lastTouchTeam = team;
+      state.lastTouchPlayerId = previousActive.id;
+      state.manualActivePlayerId[team] = passTarget.id;
+      state.manualLockRemaining[team] = passAndSwitchConfig.manualLockSeconds;
+    } else if (state.manualLockRemaining[team] > 0) {
       const curId = state.manualActivePlayerId[team] ?? order[0];
       state.manualActivePlayerId[team] = order[(order.indexOf(curId) + 1) % order.length];
       state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+    } else if (auto) {
+      state.manualActivePlayerId[team] = order[(order.indexOf(auto.id) + 1) % order.length];
+      state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
     }
-  } else if (switchEdge && auto) {
-    state.manualActivePlayerId[team] = order[(order.indexOf(auto.id) + 1) % order.length];
-    state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+  } else if (state.manualLockRemaining[team] > 0) {
+    state.manualLockRemaining[team] = Math.max(0, state.manualLockRemaining[team] - dt);
   }
 
   if (state.manualLockRemaining[team] > 0 && state.manualActivePlayerId[team]) {
@@ -234,6 +265,7 @@ export function tickGame(
   dt: number,
   behaviorConfig: GameBehaviorConfig = DEFAULT_BEHAVIOR_CONFIG,
   temporaryRemovalConfig: TemporaryRemovalConfig = DEFAULT_TEMPORARY_REMOVAL_CONFIG,
+  passAndSwitchConfig: PassAndSwitchConfig = DEFAULT_PASS_AND_SWITCH_CONFIG,
 ): void {
   // 1. Handle goal pause
   if (state.goalPause > 0) {
@@ -263,7 +295,7 @@ export function tickGame(
   const teams: Array<'home' | 'away'> = ['home', 'away'];
   for (const team of teams) {
     const input: InputState = team === 'home' ? state.inputs.home : state.inputs.guest;
-    const active = resolveActivePlayer(state, team, input, dt, removedIds);
+    const active = resolveActivePlayer(state, team, input, dt, removedIds, passAndSwitchConfig);
     const teamConfig: TeamBehaviorConfig = behaviorConfig[team];
     const supportTargets = active
       ? computeTeamSupportInputs(
