@@ -19,7 +19,12 @@ export const BUMP_FORCE = 110;
 export const RETURN_SPEED = 115;
 export const SUPPORT_PLAYER_SPEED = 120;
 export const SUPPORT_KICK_FORCE = 320;
+// The margin fades out as the current active player gets farther from the
+// ball (see computeSwitchMargin in tick.ts) — once the ball is kicked across
+// the pitch, the bias toward the old active player drops away and the
+// nearest player takes over almost immediately.
 export const ACTIVE_PLAYER_SWITCH_MARGIN = 18;
+export const ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE = 300;
 // Manual active-player switch (Q / PŘEP.) — mirrors the bot engine's
 // MANUAL_SWITCH_LOCK_DURATION in game/constants.ts.
 export const MANUAL_SWITCH_LOCK_DURATION = 2;
