@@ -63,6 +63,9 @@ export interface OnlineGameState {
   lastTouchTeam: 'home' | 'away' | null;
   lastTouchPlayerId: string | null;
   isOwnGoal: boolean;
+  // Which team was credited with the most recent goal — lets each connected
+  // client work out, from its own role, whether it scored or conceded.
+  lastScorer: 'home' | 'away' | null;
   // Manual active-player override (Q / PŘEP.), per team — mirrors the bot
   // engine's game/types.ts. Keyed by engine team ('home'/'away'), not by
   // connection role ('home'/'guest').

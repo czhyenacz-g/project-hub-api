@@ -94,6 +94,7 @@ function resetPositions(state: OnlineGameState): void {
   state.lastTouchTeam = null;
   state.lastTouchPlayerId = null;
   state.isOwnGoal = false;
+  state.lastScorer = null;
 }
 
 function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number): void {
@@ -512,6 +513,7 @@ export function tickGame(
     state.score[scorer]++;
     state.goalPause = GOAL_PAUSE_DURATION;
     state.isOwnGoal = isOwnGoal;
+    state.lastScorer = scorer;
 
     if (isOwnGoal && scorer === 'away') {
       state.goalMessage = pickMessage(HOME_OWN_GOAL_MESSAGES);

@@ -45,6 +45,7 @@ export function createInitialState(
     lastTouchTeam: null,
     lastTouchPlayerId: null,
     isOwnGoal: false,
+    lastScorer: null,
     autoActivePlayerId: { home: null, away: null },
     manualActivePlayerId: { home: null, away: null },
     manualLockRemaining: { home: 0, away: 0 },

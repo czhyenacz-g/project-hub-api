@@ -416,6 +416,7 @@ function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
     })),
     goalMessage: state.goalMessage,
     isOwnGoal: state.isOwnGoal,
+    lastScorer: state.lastScorer,
     homeClubName: room.homeClubName,
     awayClubName: room.awayClubName,
   };
