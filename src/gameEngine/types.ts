@@ -70,6 +70,10 @@ export interface OnlineGameState {
   manualActivePlayerId: { home: string | null; away: string | null };
   manualLockRemaining: { home: number; away: number };
   switchKeyWasDown: { home: boolean; away: boolean };
+  // Charged kick (tap = weaker, hold = stronger), per team — only used when
+  // TeamBehaviorConfig.usesChargedKick is true for that team.
+  kickWasDown: { home: boolean; away: boolean };
+  kickHeldSeconds: { home: number; away: number };
   // Temporary player removal (see temporaryRemoval.ts) — MVP: random substitution.
   temporaryRemovals: TemporaryPlayerRemoval[];
   randomSubstitutionTriggerSecond: { home: number; away: number };

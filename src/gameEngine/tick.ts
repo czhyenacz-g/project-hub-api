@@ -2,6 +2,7 @@ import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
+  KICK_TAP_FORCE_MULTIPLIER, KICK_MAX_CHARGE_FORCE_MULTIPLIER, KICK_MAX_CHARGE_MS,
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
   MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
@@ -162,6 +163,22 @@ function enforceMinDistance(player: OnlinePlayer, fromX: number, fromY: number, 
 
 function clampToField(v: number, lo: number, hi: number): number {
   return Math.max(lo + 25, Math.min(hi - 25, v));
+}
+
+// Kick direction: toward held movement keys, or toward the opponent's goal
+// if no direction is held.
+function computeKickDirection(input: InputState, team: 'home' | 'away'): { x: number; y: number } {
+  let kx = 0;
+  let ky = 0;
+  if (input.left || input.right || input.up || input.down) {
+    if (input.right) kx += 1;
+    if (input.left) kx -= 1;
+    if (input.down) ky += 1;
+    if (input.up) ky -= 1;
+  } else {
+    kx = team === 'home' ? 1 : -1;
+  }
+  return normalize(kx, ky);
 }
 
 // Mirrors the bot engine's active-player hysteresis (game/updateGame.ts):
@@ -361,23 +378,34 @@ export function tickGame(
           }
         }
 
-        // 6. Kick
-        if (input.kick && p.kickCooldown <= 0) {
+        // 6. Kick — charged for human-driven teams (tap = weaker, hold =
+        // stronger, fires on release); AI-driven teams (training challenge
+        // home) keep the old immediate-fire-on-press kick so their shot
+        // timing doesn't change. See TeamBehaviorConfig.usesChargedKick.
+        if (teamConfig.usesChargedKick) {
+          if (input.kick) {
+            state.kickHeldSeconds[team] = state.kickWasDown[team] ? state.kickHeldSeconds[team] + dt : 0;
+            state.kickWasDown[team] = true;
+          } else {
+            if (state.kickWasDown[team] && p.kickCooldown <= 0) {
+              const d = dist(p.x, p.y, state.ball.x, state.ball.y);
+              if (d <= KICK_RANGE) {
+                const norm = computeKickDirection(input, team);
+                const chargeT = Math.min((state.kickHeldSeconds[team] * 1000) / KICK_MAX_CHARGE_MS, 1);
+                const forceMultiplier = KICK_TAP_FORCE_MULTIPLIER
+                  + (KICK_MAX_CHARGE_FORCE_MULTIPLIER - KICK_TAP_FORCE_MULTIPLIER) * chargeT;
+                state.ball.vx += norm.x * KICK_FORCE * forceMultiplier;
+                state.ball.vy += norm.y * KICK_FORCE * forceMultiplier;
+                p.kickCooldown = KICK_COOLDOWN;
+              }
+            }
+            state.kickWasDown[team] = false;
+            state.kickHeldSeconds[team] = 0;
+          }
+        } else if (input.kick && p.kickCooldown <= 0) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (d <= KICK_RANGE) {
-            // Kick direction: toward movement direction, or toward goal
-            let kx = 0;
-            let ky = 0;
-            if (input.left || input.right || input.up || input.down) {
-              if (input.right) kx += 1;
-              if (input.left) kx -= 1;
-              if (input.down) ky += 1;
-              if (input.up) ky -= 1;
-            } else {
-              // Kick toward opposite goal
-              kx = team === 'home' ? 1 : -1;
-            }
-            const norm = normalize(kx, ky);
+            const norm = computeKickDirection(input, team);
             state.ball.vx += norm.x * KICK_FORCE;
             state.ball.vy += norm.y * KICK_FORCE;
             p.kickCooldown = KICK_COOLDOWN;

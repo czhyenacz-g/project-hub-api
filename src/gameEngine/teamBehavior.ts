@@ -15,6 +15,10 @@ export interface TeamBehaviorConfig {
   supportChaseWeight: number;
   // Minimum distance (px) the forward support player keeps from the active player.
   supportSpacing: number;
+  // Charged kick (tap = weaker, hold = stronger — see tick.ts) only makes
+  // sense for a human holding a button. AI-driven teams keep the old
+  // immediate-fire-on-press kick so their shot timing doesn't change.
+  usesChargedKick: boolean;
 }
 
 export interface GameBehaviorConfig {
@@ -28,6 +32,7 @@ export const MULTIPLAYER_TEAM_BEHAVIOR: TeamBehaviorConfig = {
   supportCanShoot: false,
   supportChaseWeight: 0.35,
   supportSpacing: 110,
+  usesChargedKick: true,
 };
 
 export const TRAINING_CHALLENGE_GUEST_BEHAVIOR: TeamBehaviorConfig = {
@@ -40,6 +45,7 @@ export const TRAINING_CHALLENGE_HOME_BEHAVIOR: TeamBehaviorConfig = {
   supportCanShoot: true,
   supportChaseWeight: 0.7,
   supportSpacing: 90,
+  usesChargedKick: false,
 };
 
 export const DEFAULT_BEHAVIOR_CONFIG: GameBehaviorConfig = {

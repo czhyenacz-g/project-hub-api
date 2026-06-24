@@ -49,6 +49,8 @@ export function createInitialState(
     manualActivePlayerId: { home: null, away: null },
     manualLockRemaining: { home: 0, away: 0 },
     switchKeyWasDown: { home: false, away: false },
+    kickWasDown: { home: false, away: false },
+    kickHeldSeconds: { home: 0, away: 0 },
     temporaryRemovals: [],
     randomSubstitutionTriggerSecond: {
       home: pickRandomTriggerSecond(temporaryRemovalConfig),
