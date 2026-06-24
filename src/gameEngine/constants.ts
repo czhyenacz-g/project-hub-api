@@ -38,6 +38,9 @@ export const ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE = 300;
 // MANUAL_SWITCH_LOCK_DURATION in game/constants.ts.
 export const MANUAL_SWITCH_LOCK_DURATION = 2;
 export const BALL_MAX_SPEED = 800;
+// Energy retained when the ball bounces off a field wall/edge.
+// Mirrors osma-liga/game/constants.ts so /hra/bot and the online engine feel the same.
+export const BALL_WALL_RESTITUTION = 0.75;
 export const MATCH_DURATION = 90;
 export const GOAL_PAUSE_DURATION = 2.5;
 

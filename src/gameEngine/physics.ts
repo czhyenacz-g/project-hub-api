@@ -3,7 +3,7 @@ import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B,
   GOAL_T, GOAL_B, GOAL_DEPTH,
   PLAYER_RADIUS, BALL_RADIUS,
-  BUMP_FORCE, BALL_MAX_SPEED,
+  BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION,
 } from './constants.js';
 
 export function dist(ax: number, ay: number, bx: number, by: number): number {
@@ -43,29 +43,29 @@ export function updateBallPhysics(ball: OnlineBall, dt: number): void {
   // Bounce off top/bottom field walls
   if (ball.y - BALL_RADIUS < FIELD_T) {
     ball.y = FIELD_T + BALL_RADIUS;
-    ball.vy = Math.abs(ball.vy);
+    ball.vy = Math.abs(ball.vy) * BALL_WALL_RESTITUTION;
   }
   if (ball.y + BALL_RADIUS > FIELD_B) {
     ball.y = FIELD_B - BALL_RADIUS;
-    ball.vy = -Math.abs(ball.vy);
+    ball.vy = -Math.abs(ball.vy) * BALL_WALL_RESTITUTION;
   }
 
   // Left wall — bounce unless in goal opening
   if (ball.x - BALL_RADIUS < FIELD_L - GOAL_DEPTH) {
     ball.x = FIELD_L - GOAL_DEPTH + BALL_RADIUS;
-    ball.vx = Math.abs(ball.vx);
+    ball.vx = Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   } else if (ball.x - BALL_RADIUS < FIELD_L && (ball.y < GOAL_T || ball.y > GOAL_B)) {
     ball.x = FIELD_L + BALL_RADIUS;
-    ball.vx = Math.abs(ball.vx);
+    ball.vx = Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   }
 
   // Right wall — bounce unless in goal opening
   if (ball.x + BALL_RADIUS > FIELD_R + GOAL_DEPTH) {
     ball.x = FIELD_R + GOAL_DEPTH - BALL_RADIUS;
-    ball.vx = -Math.abs(ball.vx);
+    ball.vx = -Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   } else if (ball.x + BALL_RADIUS > FIELD_R && (ball.y < GOAL_T || ball.y > GOAL_B)) {
     ball.x = FIELD_R - BALL_RADIUS;
-    ball.vx = -Math.abs(ball.vx);
+    ball.vx = -Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   }
 }
 
