@@ -48,6 +48,28 @@ export const BALL_CONTROL_FORCE = 130;
 export const BALL_CONTROL_INPUT_FORCE = 210;
 export const BALL_CONTROL_OFFSET = 34;
 
+// Tighter retention on top of the base ball control above — kicks in only
+// when the active player has basically stopped or sharply changed
+// direction, no opponent is closing in, and the ball isn't moving fast
+// (i.e. not a ball that was just struck). Only applies to human-driven
+// teams (TeamBehaviorConfig.usesChargedKick) — AI-driven teams keep their
+// current feel unchanged. Mirrors osma-liga/game/constants.ts.
+export const BALL_RETENTION_RADIUS = 42;
+export const BALL_RETENTION_NO_OPPONENT_RADIUS = 70;
+export const BALL_RETENTION_MAX_BALL_SPEED = 180;
+export const BALL_RETENTION_STRENGTH = 0.14;
+export const BALL_STOP_DAMPING = 0.82;
+
+// Kicking out of contact/a scrum (an opponent crowding the ball) nudges the
+// ball forward along the kick direction before applying force, and gives
+// the kick a clearance boost — so it reliably pops the ball clear instead
+// of looking like it got swallowed by nearby bodies. A normal open kick
+// (no opponent close to the ball) is completely unaffected. Only applies
+// to human-driven teams, same as the retention tweak above.
+export const KICK_CONTACT_RANGE = 50;
+export const KICK_CONTACT_BALL_NUDGE = 12;
+export const KICK_CONTACT_FORCE_MULTIPLIER = 1.3;
+
 // Corner clear
 export const CORNER_ZONE_MARGIN = 72;
 export const CORNER_CLEAR_DELAY = 8;

@@ -6,6 +6,9 @@ import {
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
   MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
+  BALL_RETENTION_RADIUS, BALL_RETENTION_NO_OPPONENT_RADIUS, BALL_RETENTION_MAX_BALL_SPEED,
+  BALL_RETENTION_STRENGTH, BALL_STOP_DAMPING,
+  KICK_CONTACT_RANGE, KICK_CONTACT_BALL_NUDGE, KICK_CONTACT_FORCE_MULTIPLIER,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
 } from './constants.js';
@@ -180,6 +183,25 @@ function computeKickDirection(input: InputState, team: 'home' | 'away'): { x: nu
     kx = team === 'home' ? 1 : -1;
   }
   return normalize(kx, ky);
+}
+
+// Distance from (x,y) to the nearest non-removed player NOT on `team` —
+// used to keep the retention/contact-clearance tweaks from kicking in
+// during a real duel.
+function nearestOpponentDistance(
+  state: OnlineGameState,
+  x: number,
+  y: number,
+  team: 'home' | 'away',
+  removedIds: Set<string>,
+): number {
+  let nearest = Infinity;
+  for (const p of state.players) {
+    if (p.team === team || removedIds.has(p.id)) continue;
+    const d = dist(x, y, p.x, p.y);
+    if (d < nearest) nearest = d;
+  }
+  return nearest;
 }
 
 // Mirrors the bot engine's active-player hysteresis (game/updateGame.ts):
@@ -376,6 +398,30 @@ export function tickGame(
               state.ball.vx += (fx / fLen) * force * dt;
               state.ball.vy += (fy / fLen) * force * dt;
             }
+
+            // Tighter retention while basically stopped or just cutting
+            // sharply — human teams only (AI keeps its current feel
+            // unchanged). Blends the ball's velocity toward the player's
+            // own so it follows a stop/turn instead of visibly coasting on
+            // momentum. Skipped near an opponent (stays contestable in a
+            // real duel) and skipped on a fast ball (never fights a ball
+            // that was just struck).
+            if (teamConfig.usesChargedKick) {
+              const ballSpeed = Math.hypot(state.ball.vx, state.ball.vy);
+              if (bcDist < BALL_RETENTION_RADIUS && ballSpeed < BALL_RETENTION_MAX_BALL_SPEED) {
+                const oppDist = nearestOpponentDistance(state, state.ball.x, state.ball.y, team, removedIds);
+                if (oppDist > BALL_RETENTION_NO_OPPONENT_RADIUS) {
+                  const playerVx = hasInput ? tNorm.x * PLAYER_SPEED : 0;
+                  const playerVy = hasInput ? tNorm.y * PLAYER_SPEED : 0;
+                  state.ball.vx += (playerVx - state.ball.vx) * BALL_RETENTION_STRENGTH;
+                  state.ball.vy += (playerVy - state.ball.vy) * BALL_RETENTION_STRENGTH;
+                  if (!hasInput) {
+                    state.ball.vx *= BALL_STOP_DAMPING;
+                    state.ball.vy *= BALL_STOP_DAMPING;
+                  }
+                }
+              }
+            }
           }
         }
 
@@ -393,8 +439,20 @@ export function tickGame(
               if (d <= KICK_RANGE) {
                 const norm = computeKickDirection(input, team);
                 const chargeT = Math.min((state.kickHeldSeconds[team] * 1000) / KICK_MAX_CHARGE_MS, 1);
-                const forceMultiplier = KICK_TAP_FORCE_MULTIPLIER
+                let forceMultiplier = KICK_TAP_FORCE_MULTIPLIER
                   + (KICK_MAX_CHARGE_FORCE_MULTIPLIER - KICK_TAP_FORCE_MULTIPLIER) * chargeT;
+
+                // Kicking out of contact/a scrum: nudge the ball forward
+                // along the kick direction first so it clearly pops out
+                // instead of looking swallowed by nearby bodies, and give
+                // the kick a clearance boost. A normal open kick is untouched.
+                const inContact = nearestOpponentDistance(state, state.ball.x, state.ball.y, team, removedIds) < KICK_CONTACT_RANGE;
+                if (inContact) {
+                  state.ball.x = Math.max(FIELD_L + BALL_RADIUS, Math.min(FIELD_R - BALL_RADIUS, state.ball.x + norm.x * KICK_CONTACT_BALL_NUDGE));
+                  state.ball.y = Math.max(FIELD_T + BALL_RADIUS, Math.min(FIELD_B - BALL_RADIUS, state.ball.y + norm.y * KICK_CONTACT_BALL_NUDGE));
+                  forceMultiplier *= KICK_CONTACT_FORCE_MULTIPLIER;
+                }
+
                 state.ball.vx += norm.x * KICK_FORCE * forceMultiplier;
                 state.ball.vy += norm.y * KICK_FORCE * forceMultiplier;
                 p.kickCooldown = KICK_COOLDOWN;
