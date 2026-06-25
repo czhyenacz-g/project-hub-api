@@ -115,11 +115,11 @@ export function snapBallInFrontOfKicker(
 }
 
 // Same-team anti-overlap: soft push apart for any two players of the same
-// team standing closer than TEAMMATE_SEPARATION_RADIUS. The active player
-// only absorbs 25% of the push so they don't feel shoved around; the other
-// player absorbs 75%. Two non-active players split the push evenly.
-// Cross-team overlap and support-positioning/formation logic are
-// intentionally untouched — this is independent of supportSpacing /
+// team standing closer than TEAMMATE_SEPARATION_RADIUS. The active player is
+// an anchor and never gets pushed — only the support/non-active player on
+// the other side of the overlap moves. Two non-active players split the
+// push evenly. Cross-team overlap and support-positioning/formation logic
+// are intentionally untouched — this is independent of supportSpacing /
 // teammateSupportMode so it always applies. KISS fix.
 // Mirrors osma-liga/game/physics.ts separateSameTeamPlayers().
 export function separateSameTeamPlayers(teamPlayers: OnlinePlayer[], activePlayerId: string | null): void {
@@ -135,8 +135,9 @@ export function separateSameTeamPlayers(teamPlayers: OnlinePlayer[], activePlaye
         const ny = d > 0.1 ? dy / d : 0;
         const totalPush = (TEAMMATE_SEPARATION_RADIUS - d) * TEAMMATE_SEPARATION_STRENGTH;
         const aIsActive = a.id === activePlayerId;
-        const aFrac = aIsActive ? 0.25 : (b.id === activePlayerId ? 0.75 : 0.5);
-        const bFrac = 1.0 - aFrac;
+        const bIsActive = b.id === activePlayerId;
+        const aFrac = aIsActive ? 0 : (bIsActive ? 1 : 0.5);
+        const bFrac = bIsActive ? 0 : (aIsActive ? 1 : 0.5);
         a.x = clamp(a.x - nx * totalPush * aFrac, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);
         a.y = clamp(a.y - ny * totalPush * aFrac, FIELD_T + PLAYER_RADIUS, FIELD_B - PLAYER_RADIUS);
         b.x = clamp(b.x + nx * totalPush * bFrac, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);

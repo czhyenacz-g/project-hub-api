@@ -39,7 +39,7 @@ export const ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE = 300;
 // pick may switch to a new player at most once per this many ms, per team,
 // regardless of how the margin/fade above evaluate. Manual switching
 // (Q / PŘEP.) is unaffected. Mirrors osma-liga/game/constants.ts.
-export const AUTO_PLAYER_SWITCH_COOLDOWN_MS = 2000;
+export const AUTO_PLAYER_SWITCH_COOLDOWN_MS = 1000;
 
 // Baseline same-team anti-overlap (KISS) — independent of supportSpacing /
 // teammateSupportMode below, so it always applies regardless of behavior
