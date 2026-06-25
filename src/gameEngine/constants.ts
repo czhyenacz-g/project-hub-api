@@ -40,6 +40,13 @@ export const ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE = 300;
 // regardless of how the margin/fade above evaluate. Manual switching
 // (Q / PŘEP.) is unaffected. Mirrors osma-liga/game/constants.ts.
 export const AUTO_PLAYER_SWITCH_COOLDOWN_MS = 2000;
+
+// Baseline same-team anti-overlap (KISS) — independent of supportSpacing /
+// teammateSupportMode below, so it always applies regardless of behavior
+// config. Mirrors osma-liga/game/constants.ts.
+export const TEAMMATE_SEPARATION_RADIUS = 42;
+export const TEAMMATE_SEPARATION_STRENGTH = 0.5;
+
 // Manual active-player switch (Q / PŘEP.) — mirrors the bot engine's
 // MANUAL_SWITCH_LOCK_DURATION in game/constants.ts.
 export const MANUAL_SWITCH_LOCK_DURATION = 2;

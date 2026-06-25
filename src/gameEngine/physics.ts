@@ -4,6 +4,7 @@ import {
   GOAL_T, GOAL_B, GOAL_DEPTH,
   PLAYER_RADIUS, BALL_RADIUS,
   BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION, KICK_SNAP_CLEARANCE,
+  TEAMMATE_SEPARATION_RADIUS, TEAMMATE_SEPARATION_STRENGTH,
 } from './constants.js';
 
 export function dist(ax: number, ay: number, bx: number, by: number): number {
@@ -111,6 +112,38 @@ export function snapBallInFrontOfKicker(
   const snapDist = PLAYER_RADIUS + BALL_RADIUS + KICK_SNAP_CLEARANCE;
   ball.x = clamp(kickerX + dirX * snapDist, FIELD_L + BALL_RADIUS, FIELD_R - BALL_RADIUS);
   ball.y = clamp(kickerY + dirY * snapDist, FIELD_T + BALL_RADIUS, FIELD_B - BALL_RADIUS);
+}
+
+// Same-team anti-overlap: soft push apart for any two players of the same
+// team standing closer than TEAMMATE_SEPARATION_RADIUS. The active player
+// only absorbs 25% of the push so they don't feel shoved around; the other
+// player absorbs 75%. Two non-active players split the push evenly.
+// Cross-team overlap and support-positioning/formation logic are
+// intentionally untouched — this is independent of supportSpacing /
+// teammateSupportMode so it always applies. KISS fix.
+// Mirrors osma-liga/game/physics.ts separateSameTeamPlayers().
+export function separateSameTeamPlayers(teamPlayers: OnlinePlayer[], activePlayerId: string | null): void {
+  for (let i = 0; i < teamPlayers.length - 1; i++) {
+    for (let j = i + 1; j < teamPlayers.length; j++) {
+      const a = teamPlayers[i];
+      const b = teamPlayers[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < TEAMMATE_SEPARATION_RADIUS) {
+        const nx = d > 0.1 ? dx / d : 1;
+        const ny = d > 0.1 ? dy / d : 0;
+        const totalPush = (TEAMMATE_SEPARATION_RADIUS - d) * TEAMMATE_SEPARATION_STRENGTH;
+        const aIsActive = a.id === activePlayerId;
+        const aFrac = aIsActive ? 0.25 : (b.id === activePlayerId ? 0.75 : 0.5);
+        const bFrac = 1.0 - aFrac;
+        a.x = clamp(a.x - nx * totalPush * aFrac, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);
+        a.y = clamp(a.y - ny * totalPush * aFrac, FIELD_T + PLAYER_RADIUS, FIELD_B - PLAYER_RADIUS);
+        b.x = clamp(b.x + nx * totalPush * bFrac, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);
+        b.y = clamp(b.y + ny * totalPush * bFrac, FIELD_T + PLAYER_RADIUS, FIELD_B - PLAYER_RADIUS);
+      }
+    }
+  }
 }
 
 export function checkGoal(ball: OnlineBall): 'home' | 'away' | null {

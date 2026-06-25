@@ -16,7 +16,7 @@ import {
 import {
   dist, normalize,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
-  snapBallInFrontOfKicker,
+  snapBallInFrontOfKicker, separateSameTeamPlayers,
 } from './physics.js';
 import {
   GameBehaviorConfig, TeamBehaviorConfig, DEFAULT_BEHAVIOR_CONFIG,
@@ -539,6 +539,12 @@ export function tickGame(
         enforceMinDistance(t2, t1.x, t1.y, teamConfig.supportSpacing);
       }
     }
+
+    // Baseline same-team anti-overlap (KISS) — independent of the support
+    // spacing above, so it always applies regardless of teammateSupportMode.
+    // Mirrors osma-liga/game/updateGame.ts + game/ai.ts.
+    const allTeamPlayers = state.players.filter((p) => p.team === team && !removedIds.has(p.id));
+    separateSameTeamPlayers(allTeamPlayers, active ? active.id : null);
   }
 
   // 7. Resolve player-ball collisions, tracking last touch for own-goal detection
