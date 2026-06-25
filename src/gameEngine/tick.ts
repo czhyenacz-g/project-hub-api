@@ -28,7 +28,7 @@ import {
 } from './temporaryRemoval.js';
 import {
   PassAndSwitchConfig, DEFAULT_PASS_AND_SWITCH_CONFIG,
-  hasBallControl, findBestPassTarget, computePassVelocity,
+  hasBallControl, findBestPassTarget, computePassVelocity, findNearestTeammateToBall,
 } from './passAndSwitch.js';
 
 const GOAL_MESSAGES = [
@@ -278,7 +278,6 @@ function resolveActivePlayer(
   const auto = findAutoActivePlayer(state, team, removedIds, dt);
   state.autoActivePlayerId[team] = auto ? auto.id : null;
 
-  const order = teamPlayers.map((p) => p.id);
   const switchEdge = input.switchPlayer && !state.switchKeyWasDown[team];
   state.switchKeyWasDown[team] = input.switchPlayer;
 
@@ -292,8 +291,10 @@ function resolveActivePlayer(
 
   if (switchEdge && previousActive) {
     // Q/PŘEP. with the ball under control passes to the best teammate and
-    // switches onto them instead of a plain cycle. Server authoritative —
-    // only ever evaluated for the team `input` belongs to (see tickGame).
+    // switches onto them (pass-and-switch). Without the ball, it switches to
+    // whichever available teammate is closest to the ball — never a blind
+    // "next in order" cycle. Server authoritative — only ever evaluated for
+    // the team `input` belongs to (see tickGame).
     const opponentTeam: 'home' | 'away' = team === 'home' ? 'away' : 'home';
     const opponents = state.players.filter((p) => p.team === opponentTeam && !removedIds.has(p.id));
     const canPass = passAndSwitchConfig.enabled && hasBallControl(previousActive, state.ball, passAndSwitchConfig);
@@ -308,13 +309,14 @@ function resolveActivePlayer(
       state.lastTouchPlayerId = previousActive.id;
       state.manualActivePlayerId[team] = passTarget.id;
       state.manualLockRemaining[team] = passAndSwitchConfig.manualLockSeconds;
-    } else if (state.manualLockRemaining[team] > 0) {
-      const curId = state.manualActivePlayerId[team] ?? order[0];
-      state.manualActivePlayerId[team] = order[(order.indexOf(curId) + 1) % order.length];
-      state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
-    } else if (auto) {
-      state.manualActivePlayerId[team] = order[(order.indexOf(auto.id) + 1) % order.length];
-      state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+    } else {
+      const nextActive = findNearestTeammateToBall(teamPlayers, state.ball, previousActive.id);
+      if (nextActive) {
+        state.manualActivePlayerId[team] = nextActive.id;
+        state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+      }
+      // No other teammate available (e.g. everyone else temporarily removed)
+      // — keep the current active player, don't touch the manual lock.
     }
   } else if (state.manualLockRemaining[team] > 0) {
     state.manualLockRemaining[team] = Math.max(0, state.manualLockRemaining[team] - dt);

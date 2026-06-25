@@ -117,6 +117,30 @@ export function findBestPassTarget(
   return best;
 }
 
+// Q / PŘEP. without ball control = switch to whichever available teammate is
+// closest to the ball, not a blind "next in order" cycle. Always excludes
+// whoever currently holds the role, so a press changes someone even if that
+// player happens to already be the closest. Returns null if no other
+// teammate is available (caller should fall back to keeping the current
+// active player). Mirrors osma-liga/game/passAndSwitch.ts.
+export function findNearestTeammateToBall(
+  teammates: OnlinePlayer[],
+  ball: OnlineBall,
+  excludePlayerId: string,
+): OnlinePlayer | null {
+  let best: OnlinePlayer | null = null;
+  let bestDist = Infinity;
+  for (const p of teammates) {
+    if (p.id === excludePlayerId) continue;
+    const d = dist(p.x, p.y, ball.x, ball.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
 // Inaccurate-on-purpose pass velocity: direction toward the target plus a
 // small angular error (shrinking as `accuracy` rises), force scaled by
 // distance and clamped to [minForce, maxForce].
