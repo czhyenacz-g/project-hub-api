@@ -12,11 +12,12 @@ import {
   KICK_CONTACT_RANGE, KICK_CONTACT_BALL_NUDGE, KICK_CONTACT_FORCE_MULTIPLIER,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
+  TEAMMATE_BALL_RECEIVE_LOCK_MS,
 } from './constants.js';
 import {
   dist, normalize,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
-  snapBallInFrontOfKicker, separateSameTeamPlayers,
+  snapBallInFrontOfKicker, separateSameTeamPlayers, findTeammateBallReceive,
 } from './physics.js';
 import {
   GameBehaviorConfig, TeamBehaviorConfig, DEFAULT_BEHAVIOR_CONFIG,
@@ -557,6 +558,23 @@ export function tickGame(
     if (toucher) {
       state.lastTouchTeam = toucher.team;
       state.lastTouchPlayerId = toucher.id;
+    }
+  }
+
+  // 7b. Teammate ball receive — a slow/catchable ball contact on a
+  // non-active teammate makes them the new active player (short lock)
+  // instead of just bumping off them like step 7 above. Own (human-driven)
+  // teams only — AI-driven teams (e.g. training challenge home) are
+  // unaffected. Mirrors osma-liga/game/updateGame.ts.
+  for (const team of teams) {
+    if (!behaviorConfig[team].usesChargedKick) continue;
+    const activePlayer = state.players.find((p) => p.team === team && p.active);
+    if (!activePlayer) continue;
+    const teammates = state.players.filter((p) => p.team === team && !removedIds.has(p.id));
+    const receiverId = findTeammateBallReceive(teammates, activePlayer.id, state.ball);
+    if (receiverId) {
+      state.manualActivePlayerId[team] = receiverId;
+      state.manualLockRemaining[team] = TEAMMATE_BALL_RECEIVE_LOCK_MS / 1000;
     }
   }
 

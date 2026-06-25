@@ -92,6 +92,14 @@ export const KICK_CONTACT_FORCE_MULTIPLIER = 1.3;
 // see that file for the full rationale.
 export const KICK_SNAP_CLEARANCE = 4;
 
+// Lets a non-active, available teammate "receive" a slow/catchable ball
+// contact and become the active player, instead of the ball just bouncing
+// off them as a random physics obstacle. Own (human-driven, i.e.
+// usesChargedKick) teams only — see tick.ts. Mirrors osma-liga/game/constants.ts.
+export const TEAMMATE_BALL_RECEIVE_MAX_SPEED = 260;
+export const TEAMMATE_BALL_RECEIVE_EXTRA_RADIUS = 4;
+export const TEAMMATE_BALL_RECEIVE_LOCK_MS = 1200;
+
 // Corner clear
 export const CORNER_ZONE_MARGIN = 72;
 export const CORNER_CLEAR_DELAY = 8;

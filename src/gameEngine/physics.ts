@@ -5,6 +5,7 @@ import {
   PLAYER_RADIUS, BALL_RADIUS,
   BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION, KICK_SNAP_CLEARANCE,
   TEAMMATE_SEPARATION_RADIUS, TEAMMATE_SEPARATION_STRENGTH,
+  TEAMMATE_BALL_RECEIVE_MAX_SPEED, TEAMMATE_BALL_RECEIVE_EXTRA_RADIUS,
 } from './constants.js';
 
 export function dist(ax: number, ay: number, bx: number, by: number): number {
@@ -94,6 +95,27 @@ export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: Onlin
   }
 
   return touched;
+}
+
+// Lets a non-active, available teammate "receive" a slow/catchable ball
+// contact instead of just bumping it like resolvePlayerBallCollisions()
+// above — returns the receiving teammate's id (caller sets them as the new
+// active player with a short lock), or null if nobody qualifies. Own team
+// only: `teammates` should already exclude the opposing team and temporarily
+// removed players. Mirrors osma-liga/game/physics.ts.
+export function findTeammateBallReceive(
+  teammates: OnlinePlayer[],
+  activePlayerId: string,
+  ball: OnlineBall,
+): string | null {
+  const ballSpeed = Math.hypot(ball.vx, ball.vy);
+  if (ballSpeed >= TEAMMATE_BALL_RECEIVE_MAX_SPEED) return null;
+  const receiveDist = PLAYER_RADIUS + BALL_RADIUS + TEAMMATE_BALL_RECEIVE_EXTRA_RADIUS;
+  for (const p of teammates) {
+    if (p.id === activePlayerId) continue;
+    if (dist(p.x, p.y, ball.x, ball.y) < receiveDist) return p.id;
+  }
+  return null;
 }
 
 // Repositions the ball just in front of the kicker along the kick direction,
