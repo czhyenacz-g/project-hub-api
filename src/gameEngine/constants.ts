@@ -34,6 +34,12 @@ export const SUPPORT_KICK_FORCE = 320;
 // nearest player takes over almost immediately.
 export const ACTIVE_PLAYER_SWITCH_MARGIN = 18;
 export const ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE = 300;
+
+// KISS guard against active-player flicker: the automatic (distance-based)
+// pick may switch to a new player at most once per this many ms, per team,
+// regardless of how the margin/fade above evaluate. Manual switching
+// (Q / PŘEP.) is unaffected. Mirrors osma-liga/game/constants.ts.
+export const AUTO_PLAYER_SWITCH_COOLDOWN_MS = 2000;
 // Manual active-player switch (Q / PŘEP.) — mirrors the bot engine's
 // MANUAL_SWITCH_LOCK_DURATION in game/constants.ts.
 export const MANUAL_SWITCH_LOCK_DURATION = 2;

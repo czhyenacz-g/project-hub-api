@@ -47,6 +47,7 @@ export function createInitialState(
     isOwnGoal: false,
     lastScorer: null,
     autoActivePlayerId: { home: null, away: null },
+    autoSwitchCooldownRemaining: { home: 0, away: 0 },
     manualActivePlayerId: { home: null, away: null },
     manualLockRemaining: { home: 0, away: 0 },
     switchKeyWasDown: { home: false, away: false },

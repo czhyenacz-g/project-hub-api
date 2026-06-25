@@ -70,6 +70,9 @@ export interface OnlineGameState {
   // engine's game/types.ts. Keyed by engine team ('home'/'away'), not by
   // connection role ('home'/'guest').
   autoActivePlayerId: { home: string | null; away: string | null };
+  // Cooldown (seconds) before the automatic pick is allowed to switch again
+  // for that team — see AUTO_PLAYER_SWITCH_COOLDOWN_MS.
+  autoSwitchCooldownRemaining: { home: number; away: number };
   manualActivePlayerId: { home: string | null; away: string | null };
   manualLockRemaining: { home: number; away: number };
   switchKeyWasDown: { home: boolean; away: boolean };

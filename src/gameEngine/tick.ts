@@ -4,6 +4,7 @@ import {
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
   KICK_TAP_FORCE_MULTIPLIER, KICK_MAX_CHARGE_FORCE_MULTIPLIER, KICK_MAX_CHARGE_MS,
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
+  AUTO_PLAYER_SWITCH_COOLDOWN_MS,
   MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   BALL_RETENTION_RADIUS, BALL_RETENTION_NO_OPPONENT_RADIUS, BALL_RETENTION_MAX_BALL_SPEED,
@@ -210,7 +211,12 @@ function nearestOpponentDistance(
 // closer to the ball by ACTIVE_PLAYER_SWITCH_MARGIN. Tracked via
 // state.autoActivePlayerId rather than p.active, so it keeps running in the
 // background while a manual override (see resolveActivePlayer) is active.
-function findAutoActivePlayer(state: OnlineGameState, team: 'home' | 'away', removedIds: Set<string>): OnlinePlayer | null {
+function findAutoActivePlayer(
+  state: OnlineGameState,
+  team: 'home' | 'away',
+  removedIds: Set<string>,
+  dt: number,
+): OnlinePlayer | null {
   let nearest: OnlinePlayer | null = null;
   let nearestDist = Infinity;
   for (const p of state.players) {
@@ -222,15 +228,26 @@ function findAutoActivePlayer(state: OnlineGameState, team: 'home' | 'away', rem
     }
   }
 
+  // KISS guard against flicker: on top of the margin/fade hysteresis below,
+  // the automatic pick may switch at most once per AUTO_PLAYER_SWITCH_COOLDOWN_MS.
+  if (state.autoSwitchCooldownRemaining[team] > 0) {
+    state.autoSwitchCooldownRemaining[team] = Math.max(0, state.autoSwitchCooldownRemaining[team] - dt);
+  }
+
   const currentId = state.autoActivePlayerId[team];
   const currentActive = currentId && !removedIds.has(currentId)
     ? state.players.find((p) => p.team === team && p.id === currentId) ?? null
     : null;
   if (!currentActive || !nearest) return nearest;
+  if (state.autoSwitchCooldownRemaining[team] > 0) return currentActive;
 
   const currentDist = dist(currentActive.x, currentActive.y, state.ball.x, state.ball.y);
   const shouldSwitch = nearest.id !== currentActive.id && nearestDist + computeSwitchMargin(currentDist) < currentDist;
-  return shouldSwitch ? nearest : currentActive;
+  if (shouldSwitch) {
+    state.autoSwitchCooldownRemaining[team] = AUTO_PLAYER_SWITCH_COOLDOWN_MS / 1000;
+    return nearest;
+  }
+  return currentActive;
 }
 
 // Manual override (Q / PŘEP., see InputState.switchPlayer). Server
@@ -258,7 +275,7 @@ function resolveActivePlayer(
   const teamPlayers = state.players.filter((p) => p.team === team && !removedIds.has(p.id));
   if (teamPlayers.length === 0) return null;
 
-  const auto = findAutoActivePlayer(state, team, removedIds);
+  const auto = findAutoActivePlayer(state, team, removedIds, dt);
   state.autoActivePlayerId[team] = auto ? auto.id : null;
 
   const order = teamPlayers.map((p) => p.id);
