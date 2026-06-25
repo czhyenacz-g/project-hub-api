@@ -3,7 +3,7 @@ import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B,
   GOAL_T, GOAL_B, GOAL_DEPTH,
   PLAYER_RADIUS, BALL_RADIUS,
-  BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION,
+  BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION, KICK_SNAP_CLEARANCE,
 } from './constants.js';
 
 export function dist(ax: number, ay: number, bx: number, by: number): number {
@@ -93,6 +93,24 @@ export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: Onlin
   }
 
   return touched;
+}
+
+// Repositions the ball just in front of the kicker along the kick direction,
+// before kick velocity is applied. Without this, a kick fired while the ball
+// still overlaps the kicker can be partially reversed later in the same tick
+// by resolvePlayerBallCollisions(), which pushes the ball away from whichever
+// side it overlaps the kicker on — not necessarily the kick direction.
+// Mirrors osma-liga/game/physics.ts snapBallInFrontOfKicker().
+export function snapBallInFrontOfKicker(
+  ball: OnlineBall,
+  kickerX: number,
+  kickerY: number,
+  dirX: number,
+  dirY: number,
+): void {
+  const snapDist = PLAYER_RADIUS + BALL_RADIUS + KICK_SNAP_CLEARANCE;
+  ball.x = clamp(kickerX + dirX * snapDist, FIELD_L + BALL_RADIUS, FIELD_R - BALL_RADIUS);
+  ball.y = clamp(kickerY + dirY * snapDist, FIELD_T + BALL_RADIUS, FIELD_B - BALL_RADIUS);
 }
 
 export function checkGoal(ball: OnlineBall): 'home' | 'away' | null {

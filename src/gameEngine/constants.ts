@@ -73,6 +73,12 @@ export const KICK_CONTACT_RANGE = 50;
 export const KICK_CONTACT_BALL_NUDGE = 12;
 export const KICK_CONTACT_FORCE_MULTIPLIER = 1.3;
 
+// On every kick, the ball is snapped to sit just outside the kicker's own
+// collision radius (PLAYER_RADIUS + BALL_RADIUS) along the kick direction,
+// before kick velocity is applied. Mirrors osma-liga/game/constants.ts —
+// see that file for the full rationale.
+export const KICK_SNAP_CLEARANCE = 4;
+
 // Corner clear
 export const CORNER_ZONE_MARGIN = 72;
 export const CORNER_CLEAR_DELAY = 8;

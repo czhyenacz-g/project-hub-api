@@ -15,6 +15,7 @@ import {
 import {
   dist, normalize,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
+  snapBallInFrontOfKicker,
 } from './physics.js';
 import {
   GameBehaviorConfig, TeamBehaviorConfig, DEFAULT_BEHAVIOR_CONFIG,
@@ -442,6 +443,12 @@ export function tickGame(
                 let forceMultiplier = KICK_TAP_FORCE_MULTIPLIER
                   + (KICK_MAX_CHARGE_FORCE_MULTIPLIER - KICK_TAP_FORCE_MULTIPLIER) * chargeT;
 
+                // Snap the ball just outside the kicker's own collision
+                // radius before applying velocity, so the shot can't be
+                // reversed/dampened by the kicker's own
+                // resolvePlayerBallCollisions() bump later this tick.
+                snapBallInFrontOfKicker(state.ball, p.x, p.y, norm.x, norm.y);
+
                 // Kicking out of contact/a scrum: nudge the ball forward
                 // along the kick direction first so it clearly pops out
                 // instead of looking swallowed by nearby bodies, and give
@@ -465,6 +472,7 @@ export function tickGame(
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (d <= KICK_RANGE) {
             const norm = computeKickDirection(input, team);
+            snapBallInFrontOfKicker(state.ball, p.x, p.y, norm.x, norm.y);
             state.ball.vx += norm.x * KICK_FORCE;
             state.ball.vy += norm.y * KICK_FORCE;
             p.kickCooldown = KICK_COOLDOWN;
