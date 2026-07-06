@@ -13,4 +13,8 @@ export const config = {
   // Optional on purpose — missing this must not crash the whole API on boot.
   // The training-challenge cron endpoint checks it at request time and fails safely if unset.
   trainingCronSecret: process.env.TRAINING_CRON_SECRET ?? null,
+  // Optional, same reason — nocni-hlidac is a separate project sharing this API.
+  // Missing this must not crash the whole API on boot; the nocni-hlidac auth
+  // preHandler fails closed (401) at request time if unset.
+  nocniHlidacApiToken: process.env.NOCNI_HLIDAC_API_TOKEN ?? null,
 } as const;

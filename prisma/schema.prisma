@@ -124,3 +124,22 @@ model OsmaOnlineMatchEvent {
   @@index([onlineMatchId])
   @@index([gameCode])
 }
+
+// Noční hlídač (nocni-hlidac.vercel.app) — samostatný projekt, žádný vztah k
+// Osmé lize. Vercel appka nemá přímé DB připojení, volá jen
+// /nocni-hlidac/* endpointy (viz src/modules/nocniHlidac/).
+model NocniHlidacPlayer {
+  id            String    @id @default(cuid())
+  discordUserId String    @unique
+  username      String
+  displayName   String?
+  avatarUrl     String?
+  bestRun       Int       @default(0)
+  currentRun    Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  @@index([discordUserId])
+  @@index([bestRun(sort: Desc), currentRun(sort: Desc)])
+}

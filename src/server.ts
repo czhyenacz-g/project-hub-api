@@ -5,6 +5,7 @@ import { db } from './db.js';
 import { osmaLigaRoutes } from './modules/osmaLiga/routes.js';
 import { onlineRoutes } from './modules/osmaLiga/onlineRoutes.js';
 import { trainingChallengeRoutes } from './modules/osmaLiga/trainingChallengeRoutes.js';
+import { nocniHlidacRoutes } from './modules/nocniHlidac/routes.js';
 import { attachSocketIO } from './ws/onlineGameSocket.js';
 
 const app = Fastify({ logger: true });
@@ -23,6 +24,7 @@ async function main(): Promise<void> {
   await app.register(osmaLigaRoutes);
   await app.register(onlineRoutes);
   await app.register(trainingChallengeRoutes);
+  await app.register(nocniHlidacRoutes);
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
 

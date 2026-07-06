@@ -45,6 +45,7 @@ npm run dev
 | `PROJECT_HUB_API_KEY` | API klíč pro autentizaci | min. 32 znaků random hex |
 | `POSTGRES_PASSWORD` | Heslo pro Postgres (jen docker-compose) | random hex |
 | `CORS_ORIGINS` | Povolené CORS origins (čárkou oddělené) | `https://osmaliga.cz` |
+| `NOCNI_HLIDAC_API_TOKEN` | Bearer token pro `/nocni-hlidac/*` endpointy (samostatný projekt, samostatný token — viz [docs/operations/nocni-hlidac.md](docs/operations/nocni-hlidac.md)) | min. 32 znaků random hex |
 
 ---
 
@@ -107,6 +108,19 @@ curl "http://localhost:3001/api/osma-liga/match-results?limit=3" \
   -H "x-project-hub-key: YOUR_API_KEY"
 ```
 
+### /nocni-hlidac/* — Noční hlídač (samostatný projekt)
+
+Vlastní token (`NOCNI_HLIDAC_API_TOKEN`), poslaný jako `Authorization: Bearer <token>`
+(NE `x-project-hub-key`). Podrobná dokumentace, request/response tvary a curl příklady:
+[docs/operations/nocni-hlidac.md](docs/operations/nocni-hlidac.md).
+
+```
+GET  /nocni-hlidac/leaderboard              — Top 10, bestRun desc / currentRun desc
+POST /nocni-hlidac/player/upsert            — založí/aktualizuje hráče (login)
+POST /nocni-hlidac/player/survive-night     — currentRun += 1, bestRun = max(...)
+POST /nocni-hlidac/player/death             — currentRun = 0, bestRun beze změny
+```
+
 ---
 
 ## Deployment na Hetzner
@@ -130,6 +144,7 @@ NODE_ENV=production
 PORT=3001
 POSTGRES_PASSWORD=$(openssl rand -hex 32)
 PROJECT_HUB_API_KEY=$(openssl rand -hex 32)
+NOCNI_HLIDAC_API_TOKEN=$(openssl rand -hex 32)
 CORS_ORIGINS=https://osmaliga.cz,https://www.osmaliga.cz
 EOF
 
@@ -208,3 +223,5 @@ PostgreSQL kontejner `project-hub-postgres` je dostupný POUZE uvnitř Docker s�
 - [ ] Structured logging (JSON logy pro log aggregator)
 - [ ] Health endpoint s DB ping
 - [ ] CI/CD (GitHub Actions → deploy na Hetzner)
+- [ ] Noční hlídač: death reason na `player/death`, `guard_runs` historie (viz
+      [docs/operations/nocni-hlidac.md](docs/operations/nocni-hlidac.md))
