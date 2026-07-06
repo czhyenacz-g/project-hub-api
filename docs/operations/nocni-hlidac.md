@@ -149,6 +149,29 @@ mířícím na `localhost:5433`), čistí si po sobě testovací řádky
 npm run test
 ```
 
+## Seed — lore/starter hráči na leaderboardu
+
+`src/modules/nocniHlidac/seed.ts` (`seedNocniHlidac()`, volaný z tenkého CLI runneru
+`scripts/seed-nocni-hlidac.ts`) — 5 falešných/lore hráčů (Strážný Novák, Hlídač #13,
+NočníPepa, Zaměstnanec 042, Kandidát směny), ať leaderboard po čerstvém nasazení nepůsobí
+prázdně. **Nejsou to reální Discord hráči** — `discordUserId` má vždy pevný prefix `seed-`
+(`seed-strazny-novak`, ...), skutečná Discord ID jsou vždy číselná, takže nemůže dojít ke
+kolizi. Idempotentní (Prisma `upsert` podle `discordUserId`), opakované spuštění jen
+přepíše `displayName`/`bestRun`/`currentRun` na aktuální definici, nikdy nevytvoří duplicitu
+a nikdy se nedotkne řádku, jehož `discordUserId` nezačíná `seed-`.
+
+```bash
+# Lokálně
+npx tsx scripts/seed-nocni-hlidac.ts
+
+# Produkce
+docker compose exec project-hub-api npx tsx scripts/seed-nocni-hlidac.ts
+```
+
+Testy v `src/modules/nocniHlidac/seed.test.ts` — vytvoří všech 5, idempotence (dvojí
+spuštění nevytvoří duplicity), nedotýká se reálného hráče, re-seed přepíše zdrolený seed
+řádek zpátky na aktuální definici.
+
 ## Plánovaný další krok
 
 - Death reason posílaný a ukládaný na `player/death`.
