@@ -158,6 +158,11 @@ model Object13HardcorePlayerProfile {
   hardcoreDoubleBarrelUnlocked Boolean  @default(false)
   hardcoreMonsterDefeatsCount  Int      @default(0)
   hardcoreBestNight            Int      @default(0)
+  // Kolikrát hráč v Hardcore zemřel v KTERÉ noci — klíč noc jako string
+  // ("1", "2", ...), hodnota počet smrtí. Append-only přírůstek k modelu
+  // (viz migrace), zbytek modelu beze změny. Bezpečně Hardcore-only stejně
+  // jako ostatní pole zde — nocni-hlidac ho zapisuje jen z Hardcore smrti.
+  hardcoreDeathsByNight        Json     @default("{}")
   createdAt                    DateTime @default(now())
   updatedAt                    DateTime @updatedAt
   lastSeenAt                   DateTime @default(now())

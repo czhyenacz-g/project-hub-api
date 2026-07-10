@@ -198,10 +198,11 @@ curl -H "Authorization: Bearer <TOKEN>" \
   "https://api.example.com/nocni-hlidac/hardcore-profile?discordUserId=123456789"
 ```
 
-Najde profil podle `discordUserId`, založí default (samé nuly/`false`), pokud ještě
+Najde profil podle `discordUserId`, založí default (samé nuly/`false`/`{}`), pokud ještě
 neexistuje, aktualizuje `lastSeenAt`. GET request nenese `displayName`/`avatarUrl` (viz
 `fetchRemoteHardcoreProfile` — posílá jen `discordUserId`), takže je tenhle endpoint
-neaktualizuje; ty se refreshují jen přes sync níže.
+neaktualizuje; ty se refreshují jen přes sync níže. `hardcoreDeathsByNight` se vrací VŽDY
+jako objekt (`{}`, pokud v DB chybí/je `null`/neplatný — nikdy `null`/`undefined`).
 
 Odpověď (200):
 ```json
@@ -213,6 +214,7 @@ Odpověď (200):
   "hardcoreDoubleBarrelUnlocked": false,
   "hardcoreMonsterDefeatsCount": 0,
   "hardcoreBestNight": 0,
+  "hardcoreDeathsByNight": {},
   "createdAt": "2026-07-09T21:00:00.000Z",
   "updatedAt": "2026-07-09T21:00:00.000Z",
   "lastSeenAt": "2026-07-09T21:00:00.000Z"
@@ -225,7 +227,7 @@ Odpověď (200):
 curl -X POST https://api.example.com/nocni-hlidac/hardcore-profile/sync \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"discordUserId":"123456789","displayName":"Czhyenacz","avatarUrl":null,"hardcoreHasDefeatedMonster":true,"hardcoreDoubleBarrelUnlocked":true,"hardcoreMonsterDefeatsCount":1,"hardcoreBestNight":9}'
+  -d '{"discordUserId":"123456789","displayName":"Czhyenacz","avatarUrl":null,"hardcoreHasDefeatedMonster":true,"hardcoreDoubleBarrelUnlocked":true,"hardcoreMonsterDefeatsCount":1,"hardcoreBestNight":9,"hardcoreDeathsByNight":{"1":1}}'
 ```
 
 Najde/založí profil, sloučí snapshot se stávajícím stavem a uloží — **nikdy neplatí jako
@@ -234,6 +236,10 @@ event sourcing, je to idempotentní snapshot merge**:
   `true`).
 - `hardcoreMonsterDefeatsCount`/`hardcoreBestNight`: `max(existing, incoming)`, nikdy
   součet, nikdy snížení.
+- `hardcoreDeathsByNight`: merge PO KLÍČI NOCI — `max(existing[night], incoming[night])`
+  pro KAŽDOU noc zvlášť, nikdy součet. Příklad: existující `{"1":2,"3":1}` + příchozí
+  `{"1":1,"2":4}` → `{"1":2,"2":4,"3":1}`. Jediný povolený death histogram — Normal death
+  histogram nemá žádné jméno pole, které by se sem četlo.
 - `displayName`/`avatarUrl`/`lastSeenAt` se vždy přepíší podle requestu.
 
 Vstup je whitelistovaný/sanitizovaný (`hardcoreProfileValidation.ts#sanitizeIncomingHardcoreSnapshot`)
@@ -243,25 +249,24 @@ Vstup je whitelistovaný/sanitizovaný (`hardcoreProfileValidation.ts#sanitizeIn
 neuloží ani nevrátí. Neplatný typ (string místo čísla, NaN/Infinity, boolean jako string)
 tiše spadne na bezpečný default (`false`/`0`), nikdy nezpůsobí 400 — jen chybějící/prázdné
 `discordUserId` v identitě dá 400. Čísla se navíc clampují: `hardcoreMonsterDefeatsCount`
-max `100000`, `hardcoreBestNight` max `10000`. Server nikdy nepřijme/neuloží zápornou
-hodnotu.
+max `100000`, `hardcoreBestNight` max `10000`. `hardcoreDeathsByNight` položky: klíč noci
+musí být kladný integer (jako string) `1..10000`, hodnota nezáporný integer `0..1000000` —
+neplatné položky (noc `<= 0`, `> 10000`, nečíselná; count záporný/necelý/`NaN`/ne-číslo) se
+tiše zahodí (jen ta konkrétní položka, ne celý histogram); `null`/pole/string místo objektu
+se bere jako `{}`. Server nikdy nepřijme/neuloží zápornou hodnotu.
 
 Odpověď (200): stejný tvar jako GET výše, s aktualizovanými hodnotami.
 
-### Rozdíl oproti nocni-hlidac `ServerHardcorePlayerProfile`
+### Historie: rozdíl oproti nocni-hlidac `ServerHardcorePlayerProfile`
 
-**Důležité, ověřit před dalším napojením:** `game/core/hardcorePlayerProfileSnapshot.ts` v
-nocni-hlidac repozitáři definuje `ServerHardcorePlayerProfile`/`HardcoreProfileSnapshot` s
-PĚTI dalšími poli (`hardcoreTotalDeaths`, `hardcoreTotalRunsStarted`,
+Dřívější verze nocni-hlidac `ServerHardcorePlayerProfile`/`HardcoreProfileSnapshot`
+deklarovala 5 polí (`hardcoreTotalDeaths`, `hardcoreTotalRunsStarted`,
 `hardcoreTotalNightsSurvived`, `hardcoreMonsterHitsConfirmed`, `hardcoreMonsterKills`), která
-`syncRemoteHardcoreProfile` už dnes posílá v každém sync requestu. Tenhle krok je záměrně
-NEIMPLEMENTUJE (zadání explicitně: "Neřeš Normal režim… Nepřijímej/ignoruj… monsterHitsConfirmed,
-monsterKills" — traktuje je stejně jako Normal-like pole) — hub API je tiše zahodí (viz výše).
-Odpověď z hubu tedy NEBUDE mít těchhle 5 klíčů, i když je klientský TS typ deklaruje jako
-`number`. Kód na nocni-hlidac straně, který z nich čte (`serverHardcoreProfileToPlayerProfileStats`),
-dostane `undefined` místo `number`. Než se cokoliv navíc napojí, tenhle nesoulad je potřeba
-vyřešit — buď zúžit `ServerHardcorePlayerProfile` v nocni-hlidac na stejné 4 pole, nebo tenhle
-hub model rozšířit o zbylých 5 (samostatný krok, mimo rozsah tohoto).
+tenhle hub nikdy neukládal — **od zadání "Srovnat ServerHardcorePlayerProfile typ a client
+mapping s reálným project-hub-api contractem" je nocni-hlidac typ zúžený na přesně to, co
+hub vrací**, takže tenhle nesoulad je vyřešený. `hardcoreDeathsByNight` (viz výše) je nové
+pole PŘIDANÉ do obou stran zároveň (stejný úkol "Uzavřít Hardcore profil a achievementy"),
+ne recidiva stejného problému.
 
 ## Plánovaný další krok
 
@@ -269,5 +274,5 @@ hub model rozšířit o zbylých 5 (samostatný krok, mimo rozsah tohoto).
 - Samostatná `guard_runs`/incident log tabulka (historie jednotlivých směn, ne jen
   agregovaný `bestRun`/`currentRun`).
 - Vzkazy hlídačů, admin/moderace — mimo rozsah tohoto kroku.
-- Rozhodnout a sladit nesoulad polí `ServerHardcorePlayerProfile` mezi nocni-hlidac a
-  tímhle hubem (viz "Rozdíl oproti nocni-hlidac ServerHardcorePlayerProfile" výše).
+- Zbylých 5 Normal-nerozlišených counterů (`hardcoreTotalDeaths` apod.) zatím záměrně
+  neimplementováno — čeká na mode-segmentovaný lokální tracking na nocni-hlidac straně.

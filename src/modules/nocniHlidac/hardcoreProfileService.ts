@@ -1,12 +1,12 @@
 import { db } from '../../db.js';
-import { HardcoreProfileSnapshot, mergeHardcoreProfileSnapshot } from './hardcoreProfileMerge.js';
+import { HardcoreProfileSnapshot, mergeHardcoreProfileSnapshot, sanitizeHardcoreDeathsByNight } from './hardcoreProfileMerge.js';
 
 // Response contract verified against nocni-hlidac's
 // game/core/hardcorePlayerProfileSnapshot.ts#ServerHardcorePlayerProfile —
-// this is the four-field subset this step covers (hasDefeatedMonster,
-// doubleBarrelUnlocked, monsterDefeatsCount, bestNight); see the report for
-// the Normal-mode/counter fields nocni-hlidac's client type additionally
-// declares that this step deliberately does not implement.
+// this is the five-field subset this model covers (hasDefeatedMonster,
+// doubleBarrelUnlocked, monsterDefeatsCount, bestNight, deathsByNight); see
+// the report for the Normal-mode/counter fields nocni-hlidac's client type
+// additionally declares that this step deliberately does not implement.
 export interface ServerHardcorePlayerProfile {
   discordUserId: string;
   displayName: string | null;
@@ -16,6 +16,7 @@ export interface ServerHardcorePlayerProfile {
   hardcoreDoubleBarrelUnlocked: boolean;
   hardcoreMonsterDefeatsCount: number;
   hardcoreBestNight: number;
+  hardcoreDeathsByNight: Record<string, number>;
 
   createdAt: string;
   updatedAt: string;
@@ -27,6 +28,7 @@ const EMPTY_SNAPSHOT: HardcoreProfileSnapshot = {
   hardcoreDoubleBarrelUnlocked: false,
   hardcoreMonsterDefeatsCount: 0,
   hardcoreBestNight: 0,
+  hardcoreDeathsByNight: {},
 };
 
 interface ProfileRowLike {
@@ -37,6 +39,12 @@ interface ProfileRowLike {
   hardcoreDoubleBarrelUnlocked: boolean;
   hardcoreMonsterDefeatsCount: number;
   hardcoreBestNight: number;
+  // Prisma's `Json` column type is `Prisma.JsonValue` (effectively
+  // `unknown`) — always run it through `sanitizeHardcoreDeathsByNight`
+  // before it reaches a response, see toResponse below. Covers "missing/
+  // null/invalid in DB -> {}" from the task spec, not just malformed
+  // request bodies.
+  hardcoreDeathsByNight: unknown;
   createdAt: Date;
   updatedAt: Date;
   lastSeenAt: Date;
@@ -51,6 +59,7 @@ function toResponse(row: ProfileRowLike): ServerHardcorePlayerProfile {
     hardcoreDoubleBarrelUnlocked: row.hardcoreDoubleBarrelUnlocked,
     hardcoreMonsterDefeatsCount: row.hardcoreMonsterDefeatsCount,
     hardcoreBestNight: row.hardcoreBestNight,
+    hardcoreDeathsByNight: sanitizeHardcoreDeathsByNight(row.hardcoreDeathsByNight),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     lastSeenAt: row.lastSeenAt.toISOString(),
@@ -92,8 +101,14 @@ export async function syncHardcoreProfile(
   const now = new Date();
 
   return db.$transaction(async (tx) => {
-    const existing = await tx.object13HardcorePlayerProfile.findUnique({ where: { discordUserId } });
-    const merged = mergeHardcoreProfileSnapshot(existing ?? EMPTY_SNAPSHOT, incoming);
+    const existingRow = await tx.object13HardcorePlayerProfile.findUnique({ where: { discordUserId } });
+    // Prisma's `Json` column type-checks as `Prisma.JsonValue`, not
+    // `Record<string, number>` — sanitize it into the plain snapshot shape
+    // before merging, same as toResponse() does for GET responses.
+    const existing: HardcoreProfileSnapshot = existingRow
+      ? { ...existingRow, hardcoreDeathsByNight: sanitizeHardcoreDeathsByNight(existingRow.hardcoreDeathsByNight) }
+      : EMPTY_SNAPSHOT;
+    const merged = mergeHardcoreProfileSnapshot(existing, incoming);
 
     const row = await tx.object13HardcorePlayerProfile.upsert({
       where: { discordUserId },

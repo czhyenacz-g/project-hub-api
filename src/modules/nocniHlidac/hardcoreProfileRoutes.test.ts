@@ -86,6 +86,7 @@ describe('GET /nocni-hlidac/hardcore-profile', () => {
     expect(typeof body.createdAt).toBe('string');
     expect(typeof body.updatedAt).toBe('string');
     expect(typeof body.lastSeenAt).toBe('string');
+    expect(body.hardcoreDeathsByNight).toEqual({});
   });
 
   it('returns the existing profile for a known discordUserId, without resetting its values', async () => {
@@ -321,5 +322,112 @@ describe('POST /nocni-hlidac/hardcore-profile/sync', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_request' });
+  });
+});
+
+describe('POST /nocni-hlidac/hardcore-profile/sync — hardcoreDeathsByNight', () => {
+  it('stores { "1": 1 } on first sync and returns it in the response', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-14', hardcoreDeathsByNight: { '1': 1 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({ '1': 1 });
+  });
+
+  it('raises { "1": 1 } to { "1": 2 } on a second sync', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-15', hardcoreDeathsByNight: { '1': 1 } },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-15', hardcoreDeathsByNight: { '1': 2 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({ '1': 2 });
+  });
+
+  it('never lowers an existing per-night count: { "1": 2 } then { "1": 1 } stays { "1": 2 }', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-16', hardcoreDeathsByNight: { '1': 2 } },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-16', hardcoreDeathsByNight: { '1': 1 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({ '1': 2 });
+  });
+
+  it('adds a new night key without touching an existing one: { "2": 3 } after { "1": 1 }', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-17', hardcoreDeathsByNight: { '1': 1 } },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-17', hardcoreDeathsByNight: { '2': 3 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({ '1': 1, '2': 3 });
+  });
+
+  it('ignores invalid night keys (0, negative, non-numeric)', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-18', hardcoreDeathsByNight: { '0': 5, '-1': 3, abc: 2, '1': 1 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({ '1': 1 });
+  });
+
+  it('clamps an extreme count to the documented maximum', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-19', hardcoreDeathsByNight: { '1': 999_999_999 } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({ '1': 1_000_000 });
+  });
+
+  it('treats null/string/array instead of an object as {} — never crashes, never stores garbage', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/hardcore-profile/sync',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-hc-discord-20', hardcoreDeathsByNight: 'not an object' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().hardcoreDeathsByNight).toEqual({});
   });
 });

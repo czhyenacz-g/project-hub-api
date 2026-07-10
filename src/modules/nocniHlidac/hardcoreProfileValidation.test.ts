@@ -34,18 +34,20 @@ describe('HardcoreProfileSyncIdentitySchema', () => {
 });
 
 describe('sanitizeIncomingHardcoreSnapshot', () => {
-  it('reads all four known hardcore fields when valid', () => {
+  it('reads all five known hardcore fields when valid', () => {
     const snapshot = sanitizeIncomingHardcoreSnapshot({
       hardcoreHasDefeatedMonster: true,
       hardcoreDoubleBarrelUnlocked: true,
       hardcoreMonsterDefeatsCount: 3,
       hardcoreBestNight: 7,
+      hardcoreDeathsByNight: { '1': 2 },
     });
     expect(snapshot).toEqual({
       hardcoreHasDefeatedMonster: true,
       hardcoreDoubleBarrelUnlocked: true,
       hardcoreMonsterDefeatsCount: 3,
       hardcoreBestNight: 7,
+      hardcoreDeathsByNight: { '1': 2 },
     });
   });
 
@@ -55,6 +57,7 @@ describe('sanitizeIncomingHardcoreSnapshot', () => {
       hardcoreDoubleBarrelUnlocked: false,
       hardcoreMonsterDefeatsCount: 0,
       hardcoreBestNight: 0,
+      hardcoreDeathsByNight: {},
     };
     expect(sanitizeIncomingHardcoreSnapshot(null)).toEqual(empty);
     expect(sanitizeIncomingHardcoreSnapshot(undefined)).toEqual(empty);
@@ -107,6 +110,22 @@ describe('sanitizeIncomingHardcoreSnapshot', () => {
       hardcoreDoubleBarrelUnlocked: false,
       hardcoreMonsterDefeatsCount: 0,
       hardcoreBestNight: 4,
+      hardcoreDeathsByNight: {},
     });
+  });
+
+  it('reads hardcoreDeathsByNight and keeps only valid per-night entries', () => {
+    const snapshot = sanitizeIncomingHardcoreSnapshot({
+      hardcoreDeathsByNight: { '1': 2, '0': 5, '-1': 3, abc: 1, '2': -4, '3': 'lots' },
+    });
+    expect(snapshot.hardcoreDeathsByNight).toEqual({ '1': 2 });
+  });
+
+  it('ignores a Normal death histogram field name — only hardcoreDeathsByNight is ever read', () => {
+    const snapshot = sanitizeIncomingHardcoreSnapshot({
+      deathsByNight: { '1': 999 },
+      normalDeathsByNight: { '1': 999 },
+    });
+    expect(snapshot.hardcoreDeathsByNight).toEqual({});
   });
 });
