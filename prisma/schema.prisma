@@ -143,3 +143,25 @@ model NocniHlidacPlayer {
   @@index([discordUserId])
   @@index([bestRun(sort: Desc), currentRun(sort: Desc)])
 }
+
+// Noční hlídač / Objekt 13 — serverový Hardcore-only profil (samostatný z
+// NocniHlidacPlayer výše, ten drží jen leaderboard bestRun/currentRun).
+// Hardcore true-ending odměna (bestie poražena, dvouhlavňovka odemčená) a
+// nejvyšší dosažená Hardcore noc — Normal se sem vůbec neukládá, viz
+// src/modules/nocniHlidac/hardcoreProfileService.ts.
+model Object13HardcorePlayerProfile {
+  id                           String   @id @default(cuid())
+  discordUserId                String   @unique
+  displayName                  String?
+  avatarUrl                    String?
+  hardcoreHasDefeatedMonster   Boolean  @default(false)
+  hardcoreDoubleBarrelUnlocked Boolean  @default(false)
+  hardcoreMonsterDefeatsCount  Int      @default(0)
+  hardcoreBestNight            Int      @default(0)
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+  lastSeenAt                   DateTime @default(now())
+
+  @@index([discordUserId])
+  @@index([hardcoreBestNight(sort: Desc)])
+}
