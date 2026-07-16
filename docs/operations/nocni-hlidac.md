@@ -268,7 +268,7 @@ hub vrací**, takže tenhle nesoulad je vyřešený. `hardcoreDeathsByNight` (vi
 pole PŘIDANÉ do obou stran zároveň (stejný úkol "Uzavřít Hardcore profil a achievementy"),
 ne recidiva stejného problému.
 
-## Obecný hráčský profil Objektu 13 (`Object13PlayerProfile`) — krok 1A + 1B (V1 kontrakt + inventář)
+## Obecný hráčský profil Objektu 13 (`Object13PlayerProfile`) — krok 1A + 1B (V1 kontrakt + inventář), rozšířeno o V2 (equipment/zbraně)
 
 Třetí, NEZÁVISLÁ tabulka od `NocniHlidacPlayer` (leaderboard identita + `bestRun`/
 `currentRun`) i od `Object13HardcorePlayerProfile` (Hardcore-only odměna/statistiky výše) —
@@ -308,6 +308,12 @@ Nový profil nikdy nezačíná na `{}` — `createDefaultObject13PlayerProfileDa
 `{ inventory: { items: { bulb: 10 } } }`. Změna `defaultQuantity` v registru ovlivní jen
 NOVĚ VYTVOŘENÉ profily, nikdy existující řádky (žádné hromadné přepsání).
 
+**Aktivní kontrakt je od kroku "profilový kontrakt V2 + equipment" `profileVersion: 2`** —
+`Object13PlayerProfileDataV1` popsaný výše zůstává v kódu jen jako typ, do kterého se
+parsuje STARÝ uložený řádek při V1→V2 migraci (viz sekce "Profilový kontrakt V2 a
+equipment" níže). Nový profil, GET i PUT dnes vždy pracují s V2 tvarem —
+`OBJECT13_PLAYER_PROFILE_SUPPORTED_VERSIONS` je dnes `[2]`, ne `[1]`.
+
 ```
 GET /nocni-hlidac/player-profile   — najde/založí profil, vrátí ho
 PUT /nocni-hlidac/player-profile   — optimistic-locked zápis (viz revision níže)
@@ -320,26 +326,27 @@ curl -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
   "https://api.example.com/nocni-hlidac/player-profile?discordUserId=123456789012345678"
 ```
 
-Najde profil podle `discordUserId`, založí default (`profileVersion: 1`,
-`profileData: {inventory: {items: {bulb: 10}}}`, `revision: 1`), pokud ještě neexistuje,
-jinak aktualizuje jen `lastSeenAt` (idempotentní — opakované volání nikdy nevytvoří druhý
-řádek).
+Najde profil podle `discordUserId`, založí default (`profileVersion: 2`,
+`profileData: {inventory: {items: {bulb: 10}}, equipment: {ownedWeapons: [], equippedWeaponId: null}}`,
+`revision: 1`), pokud ještě neexistuje, jinak aktualizuje jen `lastSeenAt` (idempotentní —
+opakované volání nikdy nevytvoří druhý řádek).
 
 **Normalizace starého/neplatného profilu na GET**: pokud uložené `profileData` u
-`profileVersion: 1` řádku NEPROJDE přísnou V1 validací (typicky starý `{}` řádek z doby
-před krokem 1B, nebo ručně/jinak poškozený řádek), GET ho v tichosti přepíše na
-`createDefaultObject13PlayerProfileDataV1()` a **tuhle opravu i persistuje** — `revision` se
-zvýší přesně o 1, protože jde o skutečnou změnu. Opakované GET už validního profilu
-`revision` znovu nezvyšuje (žádné churnování při každém čtení). Používá stejný atomicky
-podmíněný `updateMany` jako zápis níže; prohraná souběžná normalizace jen znovu přečte
-řádek, nikdy nepřepíše vítěze podruhé.
+`profileVersion: 2` řádku NEPROJDE přísnou V2 validací (typicky ručně/jinak poškozený
+řádek), GET ho v tichosti přepíše na `createDefaultObject13PlayerProfileDataV2()` a **tuhle
+opravu i persistuje** — `revision` se zvýší přesně o 1, protože jde o skutečnou změnu.
+Opakované GET už validního profilu `revision` znovu nezvyšuje (žádné churnování při každém
+čtení). Používá stejný atomicky podmíněný `updateMany` jako zápis níže; prohraná souběžná
+normalizace jen znovu přečte řádek, nikdy nepřepíše vítěze podruhé. **Starý `profileVersion:
+1` řádek se navíc při GET nejdřív jednorázově migruje na V2** — viz sekce "Profilový
+kontrakt V2 a equipment" níže pro přesný mechanismus.
 
 Odpověď (200):
 ```json
 {
   "discordUserId": "123456789012345678",
-  "profileVersion": 1,
-  "profileData": { "inventory": { "items": { "bulb": 10 } } },
+  "profileVersion": 2,
+  "profileData": { "inventory": { "items": { "bulb": 10 } }, "equipment": { "ownedWeapons": [], "equippedWeaponId": null } },
   "revision": 1,
   "createdAt": "2026-07-16T12:00:00.000Z",
   "updatedAt": "2026-07-16T12:00:00.000Z",
@@ -364,38 +371,37 @@ nemohla nic existujícího rozbít.
 curl -X PUT https://api.example.com/nocni-hlidac/player-profile \
   -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"discordUserId":"123456789012345678","expectedRevision":1,"profileVersion":1,"profileData":{"inventory":{"items":{"bulb":10}}}}'
+  -d '{"discordUserId":"123456789012345678","expectedRevision":1,"profileVersion":2,"profileData":{"inventory":{"items":{"bulb":10}},"equipment":{"ownedWeapons":[],"equippedWeaponId":null}}}'
 ```
 
 **Tenhle obecný PUT je určený jen pro technické/dev účely** (např. `nocni-hlidac`'s
 dev-only "TEST PROFILE WRITE" v `DebugPanel.tsx`, které profil jen znovu uloží beze
-změny). Běžná herní logika (získání/spotřeba náhradní žárovky) NIKDY nejde přes tenhle
-endpoint — používá doménové operace `/inventory/bulb/add`/`/inventory/bulb/consume` níže,
-které mají vlastní optimistic locking purpose-built pro jednu položkovou změnu, ne
-whole-profile přepis.
+změny). Běžná herní logika (získání/spotřeba náhradní žárovky, odemčení zbraně) NIKDY
+nejde přes tenhle endpoint — používá doménové operace `/inventory/bulb/add`/
+`/inventory/bulb/consume`/`/equipment/weapon/unlock` (viz níže), které mají vlastní
+optimistic locking purpose-built pro jednu konkrétní změnu, ne whole-profile přepis.
 
 Vyžaduje `discordUserId` (stejný přísnější snowflake formát jako GET), `expectedRevision`
 (kladné celé číslo), `profileVersion` (kladné celé číslo, musí být v
-`OBJECT13_PLAYER_PROFILE_SUPPORTED_VERSIONS`, dnes jen `[1]`) a `profileData`.
+`OBJECT13_PLAYER_PROFILE_SUPPORTED_VERSIONS`, dnes jen `[2]`) a `profileData`.
 
-**Validace `profileData` je přísná, plně whitelistovaná podle přesného V1 tvaru** — žádný
-tichý fallback na bezpečný default (`validateObject13PlayerProfileDataV1`,
-`playerProfileValidation.ts`). Musí to být plain JSON objekt s JEDINÝM top-level klíčem
-`inventory` (cokoliv jiného → 400 `invalid_profile_data`, kód `unknown_top_level_key`);
-`inventory` musí mít jediný klíč `items`; `items` je objekt, jehož klíče musí být ID ze
-`OBJECT13_INVENTORY_ITEM_REGISTRY` (dnes jen `"bulb"`, jinak `unknown_item_id`) a hodnoty
-celá čísla uvnitř `[minQuantity, maxQuantity]` z registru (jinak `invalid_quantity`/
-`quantity_out_of_range`). Protože je tenhle validátor plně whitelistovaný (jen tři pevné
-literály + konečná množina item ID), `__proto__`/`constructor`/`prototype` na jakékoliv
-úrovni skončí jako "neznámý klíč" dřív, než by šlo o cokoliv nebezpečného — žádná
-samostatná rekurzivní dangerous-key kontrola už není potřeba (`__proto__` navíc blokuje
-už samotný výchozí Fastify JSON body parser dřív, než request vůbec dorazí do routy).
-Serializovaná velikost (`JSON.stringify`, UTF-8 bajty) se pořád kontroluje proti
-`OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` (32 KB, `playerProfileInventory.ts`) jako
-defense-in-depth pro budoucí větší registr — dnešní jediná položka `bulb` ho reálně nemůže
-přiblížit. Neznámá top-level pole v těle requestu (cokoliv mimo `discordUserId`/
-`expectedRevision`/`profileVersion`/`profileData`) se nikdy neuloží (zod `.safeParse` je
-tiše odstraní z parsovaného výsledku).
+**Validace `profileData` je přísná, plně whitelistovaná podle přesného V2 tvaru** — žádný
+tichý fallback na bezpečný default (`validateObject13PlayerProfileDataV2`,
+`playerProfileValidation.ts`). Musí to být plain JSON objekt s PŘESNĚ dvěma top-level klíči
+`inventory`/`equipment` (cokoliv jiného → 400 `invalid_profile_data`, kód
+`unknown_top_level_key`); `inventory` validovaná stejně jako v V1 (`items` musí mít klíče
+ze `OBJECT13_INVENTORY_ITEM_REGISTRY`, hodnoty celá čísla v `[minQuantity, maxQuantity]`);
+`equipment` validovaná přes `validateEquipmentState` (`playerProfileEquipment.ts`) — viz
+sekce "Profilový kontrakt V2 a equipment" níže pro přesná pravidla. Protože je tenhle
+validátor plně whitelistovaný (pevné literály + konečná množina item/weapon ID),
+`__proto__`/`constructor`/`prototype` na jakékoliv úrovni skončí jako "neznámý klíč" dřív,
+než by šlo o cokoliv nebezpečného — žádná samostatná rekurzivní dangerous-key kontrola už
+není potřeba (`__proto__` navíc blokuje už samotný výchozí Fastify JSON body parser dřív,
+než request vůbec dorazí do routy). Serializovaná velikost (`JSON.stringify`, UTF-8 bajty)
+se pořád kontroluje proti `OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` (32 KB,
+`playerProfileInventory.ts`) jako defense-in-depth. Neznámá top-level pole v těle requestu
+(cokoliv mimo `discordUserId`/`expectedRevision`/`profileVersion`/`profileData`) se nikdy
+neuloží (zod `.safeParse` je tiše odstraní z parsovaného výsledku).
 
 **Optimistic locking (`revision`)**: zápis NIKDY neprovádí `findUnique` a pak nechráněný
 `update` (to by byla lost-update race — dva souběžní volající by mohli oba přečíst stejnou
@@ -414,7 +420,7 @@ Odpověď (409) při konfliktu revision:
 {
   "error": "revision_conflict",
   "currentRevision": 4,
-  "profile": { "discordUserId": "...", "profileVersion": 1, "profileData": {"inventory":{"items":{"bulb":10}}}, "revision": 4, "...": "..." }
+  "profile": { "discordUserId": "...", "profileVersion": 2, "profileData": {"inventory":{"items":{"bulb":10}},"equipment":{"ownedWeapons":[],"equippedWeaponId":null}}, "revision": 4, "...": "..." }
 }
 ```
 
@@ -470,21 +476,132 @@ zápis/optimistic-locking v `playerProfileInventoryService.ts`.
 | 409 | `consume`: výsledná hodnota by šla pod `minQuantity` (0) | `{"error":"insufficient_inventory"}` |
 | 500 | Neočekávaná chyba | `{"error":"internal_error"}` |
 
+## Profilový kontrakt V2 a equipment (vlastnictví zbraní)
+
+Navazuje na V1 inventář výše — řeší nahlášený bug, kdy Hardcore hráč, který si vysloužil
+brokovnici, o ni přišel hned v příští misi (viz `nocni-hlidac` `TECH_DESIGN.md` "Profilový
+kontrakt V2 a equipment" pro klientskou stranu opravy). Vlastnictví zbraně je od teď
+DLOUHODOBÝ profilový stav (`equipment.ownedWeapons`/`equipment.equippedWeaponId`), stejná
+server-confirmed architektura jako inventář žárovek. Nabité náboje/probíhající střelba
+zůstávají výhradně na `nocni-hlidac` straně (runtime `GameState`) — server o nich neví nic.
+
+### Tvar (`profileVersion: 2`)
+
+```ts
+type WeaponId = 'single_shotgun' | 'double_barrel_shotgun';
+interface Object13EquipmentState {
+  ownedWeapons: WeaponId[];           // trvale vlastněné zbraně, bez duplicit
+  equippedWeaponId: WeaponId | null;  // musí být null, nebo prvek ownedWeapons
+}
+type Object13PlayerProfileDataV2 = {
+  inventory: { items: Object13InventoryItems }; // beze změny oproti V1
+  equipment: Object13EquipmentState;
+};
+```
+
+`createDefaultObject13PlayerProfileDataV2()` vrací `{inventory: {items: {bulb: 10}},
+equipment: {ownedWeapons: [], equippedWeaponId: null}}`. Weapon registry
+(`WEAPON_REGISTRY`, `playerProfileEquipment.ts`) je jediný zdroj kapacity munice pro
+`nocni-hlidac` stranu: `single_shotgun` → `ammoCapacity: 1`, `double_barrel_shotgun` →
+`ammoCapacity: 2`. Server samotný kapacitu nikde nepoužívá (munice je čistě klientská
+runtime hodnota) — registr existuje hlavně kvůli `isWeaponId`/validaci a jako budoucí
+rozšiřitelný bod pro další zbraně.
+
+### V1 → V2 migrace (lazy, na GET)
+
+`getOrCreateObject13PlayerProfile` (`playerProfileService.ts`): při GET řádku s
+`profileVersion === 1` se profil NEJDŘÍV zparsuje jako V1 (přísná V1 validace; neplatný/
+poškozený `{}` řádek padá zpátky na V1 default), počet žárovek se PŘESNĚ zachová, přidá se
+prázdný `equipment: {ownedWeapons: [], equippedWeaponId: null}`, `profileVersion` se
+nastaví na `2` a `revision` se zvýší PŘESNĚ o 1 (jedna atomická změna, ne dvě). Používá
+stejný `updateMany WHERE discordUserId AND revision` vzor jako běžný zápis — prohraná
+souběžná migrace jen znovu přečte už zmigrovaný řádek. Opakovaný GET stejného řádku (už
+`profileVersion: 2`) migraci znovu nespouští (žádné churnování). Migrace je bezeztrátová
+pro žárovky, idempotentní a type-safe (výsledek jde vždy přes stejnou V2 validaci jako
+kterýkoliv jiný zápis).
+
+### Validace equipmentu (`validateEquipmentState`, `playerProfileEquipment.ts`)
+
+Plně whitelistovaná, žádný silent fallback — stejný přísný duch jako V1 inventory validace:
+
+| Chybový kód | Kdy |
+|---|---|
+| `not_object` | `equipment` není plain objekt |
+| `unknown_equipment_key` | jiný klíč než `ownedWeapons`/`equippedWeaponId` |
+| `ownedWeapons_not_array` | `ownedWeapons` není pole |
+| `unknown_weapon_id` | prvek `ownedWeapons` (nebo `equippedWeaponId`) není `single_shotgun`/`double_barrel_shotgun` |
+| `duplicate_weapon_id` | `ownedWeapons` obsahuje stejný `WeaponId` dvakrát |
+| `invalid_equipped_weapon_id` | `equippedWeaponId` není `null` ani platný `WeaponId` |
+| `equipped_weapon_not_owned` | `equippedWeaponId` není `null`, ale chybí v `ownedWeapons` |
+
+### POST /nocni-hlidac/player-profile/equipment/weapon/unlock
+
+Jediná doménová operace pro trvalé odemčení zbraně — běžná herní logika (nález brokovnice v
+nouzové výpravě, vysloužení dvouhlavňovky true endingem) NIKDY nejde přes obecný PUT.
+
+```bash
+curl -X POST https://api.example.com/nocni-hlidac/player-profile/equipment/weapon/unlock \
+  -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"discordUserId":"123456789012345678","weaponId":"single_shotgun","expectedRevision":3}'
+```
+
+Pravidla auto-equipu (`unlockWeapon`, pure funkce v `playerProfileEquipment.ts`):
+- odemčení `single_shotgun`: přidá do `ownedWeapons` (pokud tam ještě není), vybaví ho JEN
+  pokud `equippedWeaponId === null` — nikdy nepřepíše už vybavenou dvouhlavňovku;
+- odemčení `double_barrel_shotgun`: přidá do `ownedWeapons`, VŽDY ho rovnou vybaví;
+  `single_shotgun` v `ownedWeapons` (pokud tam byl) zůstává jako historicky vlastněná
+  zbraň, jen přestává být vybavený.
+
+**Idempotence beze zbytečné revision churny**: pokud je zbraň už vlastněná A správně
+vybavená, `unlockWeapon` je čistý no-op (vrací STEJNOU referenci equipment objektu) —
+`playerProfileEquipmentService.ts` na tom pozná, že nemá co zapisovat, a vrátí aktuální
+profil BEZ zápisu do DB a BEZ inkrementu `revision`. Odpověď (200) je v obou případech
+(`updated` i `unchanged`) stejný tvar — klient rozdíl nepotřebuje rozlišovat.
+
+**Optimistic locking** — stejný `findUnique` → spočítat čistý výsledek → atomický
+`updateMany WHERE discordUserId AND revision = expectedRevision` → při `count: 0` znovu
+přečíst a rozhodnout 404 vs. 409 vzor jako u inventářových operací výše. Nikdy nechráněný
+`findUnique` → `update`.
+
+Odpověď (200) při úspěchu (updated i unchanged): stejný tvar jako GET, `revision` zvýšené
+o 1 (updated) nebo beze změny (unchanged).
+
+Odpověď (409) při konfliktu revision: stejný tvar jako u inventářových operací
+(`{"error":"revision_conflict","currentRevision":N,"profile":{...}}`).
+
+| Stav | Kdy | Tvar |
+|---|---|---|
+| 200 | Úspěch (nová i idempotentní no-op) | stejný tvar jako GET |
+| 400 | Neplatné tělo (`weaponId` není `single_shotgun`/`double_barrel_shotgun`, `expectedRevision` chybí/není kladné celé číslo) | `{"error":"invalid_request"}` |
+| 401 | Chybějící/špatný token | `{"error":"unauthorized"}` |
+| 404 | Profil pro `discordUserId` neexistuje | `{"error":"profile_not_found"}` |
+| 409 | `expectedRevision` neodpovídá aktuální hodnotě v DB | `{"error":"revision_conflict","currentRevision":N,"profile":{...}}` |
+| 500 | Neočekávaná chyba | `{"error":"internal_error"}` |
+
+**`POST .../equipment/weapon/equip` záměrně NEEXISTUJE** — pure funkce `equipWeapon`
+(přepnutí mezi už vlastněnými zbraněmi) je napsaná a otestovaná v
+`playerProfileEquipment.ts`, ale routa se zatím neregistruje, protože `nocni-hlidac` nemá
+žádné UI pro přepínání zbraní (jen automatický auto-equip při unlocku výše). Přidání routy
+je jen `app.register` navíc, až UI vznikne.
+
 ### DB model
 
 `Object13PlayerProfile` (`prisma/schema.prisma`), migrace
-`prisma/migrations/20260716115859_add_object13_player_profile/` (vznik tabulky, krok 1A) a
+`prisma/migrations/20260716115859_add_object13_player_profile/` (vznik tabulky, krok 1A),
 `prisma/migrations/20260716134119_object13_player_profile_v1_default/` (sloupcový default
-`profileData` změněn z `{}` na validní V1 tvar, krok 1B — jen `ALTER COLUMN ... SET DEFAULT`,
-nemigruje žádná existující data, protože v době změny tabulka žádná produkční data
-neobsahovala):
+`profileData` změněn z `{}` na validní V1 tvar, krok 1B) a
+`prisma/migrations/20260716173106_object13_player_profile_v2_equipment/` (sloupcový default
+`profileVersion` `1→2` a `profileData` na validní V2 tvar s prázdným equipmentem, krok
+"profilový kontrakt V2 + equipment" — opět jen `ALTER COLUMN ... SET DEFAULT`, nemigruje
+žádná existující data; existující V1 řádky se migrují lazy na GET, viz výše):
 
 ```prisma
 model Object13PlayerProfile {
   id             String   @id @default(cuid())
   discordUserId  String   @unique
-  profileVersion Int      @default(1)
-  profileData    Json     @default("{\"inventory\":{\"items\":{\"bulb\":10}}}")
+  profileVersion Int      @default(2)
+  profileData    Json     @default("{\"inventory\":{\"items\":{\"bulb\":10}},\"equipment\":{\"ownedWeapons\":[],\"equippedWeaponId\":null}}")
   revision       Int      @default(1)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -495,47 +612,71 @@ model Object13PlayerProfile {
 }
 ```
 
-Krok 1A migrace: jen `CREATE TABLE` + 3 indexy. Krok 1B migrace: jen `ALTER COLUMN`
-sloupcového defaultu — ani jedna nemění existující Hardcore/leaderboard tabulku, nemigruje
-historická data (v době změny žádná produkční data v tabulce nebyla), nevytváří testovací
-řádky.
+Krok 1A migrace: jen `CREATE TABLE` + 3 indexy. Krok 1B a equipment migrace: jen `ALTER
+COLUMN` sloupcového defaultu — žádná z nich nemění existující Hardcore/leaderboard tabulku,
+nemigruje historická data (schema-level default se týká jen nově vytvářených řádků;
+existující řádky migruje lazy GET popsaný výše), nevytváří testovací řádky.
 
 **Produkční nasazení (postup, zatím NEPROVEDENO):**
 1. Vytvořit zálohu databáze (viz `docs/operations/backups.md`).
 2. Ověřit stav Prisma migrací na produkci (`docker compose exec project-hub-api npx prisma migrate status`).
 3. Spustit `docker compose exec project-hub-api npx prisma migrate deploy`.
-4. Nasadit novou verzi API (obsahuje nové inventářové routy a přísnější V1 validaci).
+4. Nasadit novou verzi API (obsahuje equipment routu, V2 validaci, V1→V2 migraci).
 5. Smoke test: `GET /nocni-hlidac/player-profile?discordUserId=<reálné testovací ID>` a ověřit
-   odpověď 200 s `profileVersion: 1`, `profileData: {"inventory":{"items":{"bulb":10}}}`,
-   `revision: 1` (nebo `2`, pokud šlo o starší `{}` řádek, který GET normalizoval).
-6. Smoke test add/consume: `POST /inventory/bulb/add` a `/inventory/bulb/consume` s
-   testovacím účtem, ověřit `revision` +1 a správnou hodnotu `bulb`, pak testovací profil
-   smazat.
+   odpověď 200 s `profileVersion: 2`, `profileData` obsahující `equipment`, a `revision`
+   zvýšenou přesně o 1 oproti stavu před nasazením, POKUD šlo o starý V1 řádek (u nově
+   vytvořeného/už V2 řádku beze změny).
+6. Smoke test unlock: `POST /equipment/weapon/unlock` s testovacím účtem a
+   `weaponId: "single_shotgun"`, ověřit `revision` +1, `ownedWeapons` obsahující
+   `"single_shotgun"` a `equippedWeaponId: "single_shotgun"`, pak testovací profil smazat.
+7. Smoke test add/consume (V1 dědictví, beze změny): `POST /inventory/bulb/add` a
+   `/inventory/bulb/consume` s testovacím účtem, ověřit `revision` +1 a správnou hodnotu
+   `bulb`, pak testovací profil smazat.
 
 ### Testy
 
 `src/modules/nocniHlidac/playerProfileInventory.test.ts` — čistá logika registru a
 inventářových operací (`addInventoryItem`/`consumeInventoryItem`/
-`getInventoryItemQuantity`/`normalizeInventoryQuantity`), bez DB.
-`src/modules/nocniHlidac/playerProfileValidation.test.ts` — envelope schema, V1 shape
-validace (`validateObject13PlayerProfileDataV1`), inventory operation body schema, bez DB.
+`getInventoryItemQuantity`/`normalizeInventoryQuantity`), bez DB. Generalizovaná od kroku
+V2 na `<T extends WithInventoryItems>`, aby fungovala i nad V2 profilem se zachovaným
+`equipment` polem (viz "Profilový kontrakt V2" výše) — beze změny chování pro V1.
+`src/modules/nocniHlidac/playerProfileEquipment.test.ts` (NOVÝ, krok V2) — 29 testů čisté
+equipment logiky: registry, `isWeaponId`, `hasOwnedWeapon`/`getEquippedWeapon`,
+`unlockWeapon` (včetně ověření stejné reference při idempotentním no-opu), `equipWeapon`,
+`normalizeOwnedWeapons`, `validateEquipmentState` (každý chybový kód).
+`src/modules/nocniHlidac/playerProfileValidation.test.ts` — envelope schema, V1 i V2 shape
+validace (`validateObject13PlayerProfileDataV1`/`validateObject13PlayerProfileDataV2`,
+posledně jmenovaná včetně `equipment_invalid` error-wrapping), inventory/weapon operation
+body schema, bez DB.
 `src/modules/nocniHlidac/playerProfileRoutes.test.ts` — plné route testy přes Fastify
-`.inject()` proti lokální dev Postgres (GET/PUT, normalizace starého `{}` profilu,
-souběžnostní test). `src/modules/nocniHlidac/playerProfileInventoryRoutes.test.ts` — plné
-route testy pro `/inventory/bulb/add|consume` (úspěch, `exceeds_maximum`,
-`insufficient_inventory`, `revision_conflict`, souběžný `consume`). Testovací
-`discordUserId` používají rezervované číselné bloky (`90000000000000xxx` pro
+`.inject()` proti lokální dev Postgres (GET/PUT s V2 payloady, plus samostatný "V1 -> V2
+migration" blok: přesné zachování počtu žárovek, `revision` +1 jen jednou, idempotentní
+re-GET, migrace legacy `{}` řádku, souběžnostní test). 31 testů.
+`src/modules/nocniHlidac/playerProfileInventoryRoutes.test.ts` — plné route testy pro
+`/inventory/bulb/add|consume` (úspěch, `exceeds_maximum`, `insufficient_inventory`,
+`revision_conflict`, souběžný `consume`).
+`src/modules/nocniHlidac/playerProfileEquipmentRoutes.test.ts` (NOVÝ, krok V2) — 9 route
+testů pro `/equipment/weapon/unlock`: odemčení single (přidá+vybaví), idempotentní opakování
+(revision beze změny), odemčení double barrel (přidá+vybaví, single zůstává vlastněný),
+zastaralá revision → 409, dva souběžné unlocky → přesně jeden 200, neplatný `weaponId` →
+400, neexistující profil → 404, chybějící auth → 401.
+Testovací `discordUserId` používají rezervované číselné bloky (`90000000000000xxx` pro
 `playerProfileRoutes.test.ts`, `90000000000001xxx` pro
-`playerProfileInventoryRoutes.test.ts` — oddělené bloky, ať souběžný test-run obou souborů
-nekoliduje), čistí se po sobě v `afterEach`.
+`playerProfileInventoryRoutes.test.ts`, `90000000000002xxx` pro
+`playerProfileEquipmentRoutes.test.ts` — oddělené bloky, ať souběžný test-run všech souborů
+nekoliduje), čistí se po sobě v `afterEach`. Celý `nocni-hlidac` modul: 244 testů, všechny
+zelené.
 
 ## Plánovaný další krok
 
 - Přesun `nocni-hlidac`'s `bulbsRemaining`/localStorage na VPS jako autoritativní zdroj pro
-  přihlášeného hráče (klientská strana kroku 1B) — serverová strana (tenhle dokument) je
-  hotová, čeká se na napojení klienta.
-- Rozšíření inventáře o další položky (zbraně, munice, baterie, vybavení kanceláře) — nový
-  klíč v `OBJECT13_INVENTORY_ITEM_REGISTRY`, žádná změna kontraktu ani schématu.
+  přihlášeného hráče (klientská strana kroku 1B) — hotovo, klient je napojený.
+- Vlastnictví zbraní (equipment V2, viz výše) — server i klient hotové; zbývá produkční
+  nasazení (postup viz "Produkční nasazení" výše, zatím NEPROVEDENO) a volitelná
+  `POST .../equipment/weapon/equip` routa, až vznikne UI pro přepínání zbraní.
+- Rozšíření equipmentu o další zbraně — nový klíč ve `WEAPON_REGISTRY` (oba repozitáře),
+  žádná další architektonická změna. Rozšíření inventáře o další položky (munice, baterie,
+  vybavení kanceláře) — nový klíč v `OBJECT13_INVENTORY_ITEM_REGISTRY`, stejně tak.
 - Death reason posílaný a ukládaný na `player/death`.
 - Samostatná `guard_runs`/incident log tabulka (historie jednotlivých směn, ne jen
   agregovaný `bestRun`/`currentRun`).

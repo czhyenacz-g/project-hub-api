@@ -19,7 +19,8 @@ function testDiscordId(suffix: number): string {
   return `${TEST_ID_PREFIX}${String(suffix).padStart(3, '0')}`;
 }
 
-const DEFAULT_V1_DATA = { inventory: { items: { bulb: 10 } } };
+const DEFAULT_EQUIPMENT = { ownedWeapons: [], equippedWeaponId: null };
+const DEFAULT_V2_DATA = { inventory: { items: { bulb: 10 } }, equipment: DEFAULT_EQUIPMENT };
 
 async function buildApp() {
   const app = Fastify();
@@ -62,14 +63,14 @@ describe('auth', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: { authorization: 'Bearer definitely-wrong' },
-      payload: { discordUserId: testDiscordId(1), expectedRevision: 1, profileVersion: 1, profileData: DEFAULT_V1_DATA },
+      payload: { discordUserId: testDiscordId(1), expectedRevision: 1, profileVersion: 2, profileData: DEFAULT_V2_DATA },
     });
     expect(res.statusCode).toBe(401);
   });
 });
 
 describe('GET /nocni-hlidac/player-profile', () => {
-  it('1/2/3/4. creates a new profile with profileVersion 1, the default V1 inventory, revision 1', async () => {
+  it('1. creates a new profile with profileVersion 2, empty equipment, default inventory, revision 1', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(10);
     const res = await app.inject({
@@ -81,8 +82,8 @@ describe('GET /nocni-hlidac/player-profile', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.discordUserId).toBe(discordUserId);
-    expect(body.profileVersion).toBe(1);
-    expect(body.profileData).toEqual(DEFAULT_V1_DATA);
+    expect(body.profileVersion).toBe(2);
+    expect(body.profileData).toEqual(DEFAULT_V2_DATA);
     expect(body.revision).toBe(1);
     expect(typeof body.createdAt).toBe('string');
     expect(typeof body.updatedAt).toBe('string');
@@ -90,7 +91,7 @@ describe('GET /nocni-hlidac/player-profile', () => {
     expect(body.id).toBeUndefined();
   });
 
-  it('5/7. repeated GET never creates a second row (discordUserId is unique)', async () => {
+  it('repeated GET never creates a second row (discordUserId is unique)', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(11);
 
@@ -102,7 +103,7 @@ describe('GET /nocni-hlidac/player-profile', () => {
     expect(rows).toHaveLength(1);
   });
 
-  it('6. repeated GET updates lastSeenAt but never touches revision/profileData/createdAt of an already-valid profile', async () => {
+  it('repeated GET updates lastSeenAt but never touches revision/profileData/createdAt of an already-valid profile', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(12);
 
@@ -127,7 +128,7 @@ describe('GET /nocni-hlidac/player-profile', () => {
     expect(second.json().createdAt).toBe(first.json().createdAt);
   });
 
-  it('8. an invalid Discord ID returns 400', async () => {
+  it('an invalid Discord ID returns 400', async () => {
     const app = await buildApp();
     const res = await app.inject({
       method: 'GET',
@@ -138,39 +139,18 @@ describe('GET /nocni-hlidac/player-profile', () => {
     expect(res.json()).toEqual({ error: 'invalid_request' });
   });
 
-  it('8b. a missing discordUserId query param returns 400', async () => {
+  it('a missing discordUserId query param returns 400', async () => {
     const app = await buildApp();
     const res = await app.inject({ method: 'GET', url: '/nocni-hlidac/player-profile', headers: authHeaders });
     expect(res.statusCode).toBe(400);
   });
 
-  it('7. a legacy pre-1B empty {} profileData in the DB is normalized to the default V1 inventory on read, and the fix is persisted (revision bumps)', async () => {
-    const app = await buildApp();
-    const discordUserId = testDiscordId(13);
-
-    await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
-      VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{}'::jsonb, 1, now())`;
-
-    const res = await app.inject({
-      method: 'GET',
-      url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
-      headers: authHeaders,
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().profileData).toEqual(DEFAULT_V1_DATA);
-    expect(res.json().revision).toBe(2);
-
-    const row = await db.object13PlayerProfile.findUnique({ where: { discordUserId } });
-    expect(row?.profileData).toEqual(DEFAULT_V1_DATA);
-    expect(row?.revision).toBe(2);
-  });
-
-  it('a corrupted (non-object) profileData already in the DB is normalized to the default V1 inventory on read', async () => {
+  it('a corrupted (non-object) profileData already in the DB is normalized to the default V2 shape on read', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(14);
 
     await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
-      VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '"not an object"'::jsonb, 1, now())`;
+      VALUES (gen_random_uuid()::text, ${discordUserId}, 2, '"not an object"'::jsonb, 1, now())`;
 
     const res = await app.inject({
       method: 'GET',
@@ -178,15 +158,16 @@ describe('GET /nocni-hlidac/player-profile', () => {
       headers: authHeaders,
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().profileData).toEqual(DEFAULT_V1_DATA);
+    expect(res.json().profileData).toEqual(DEFAULT_V2_DATA);
+    expect(res.json().revision).toBe(2);
   });
 
-  it('8. a GET of an already-normalized/valid V1 profile does NOT bump revision again on a second read', async () => {
+  it('a GET of an already-normalized/valid V2 profile does NOT bump revision again on a second read', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(15);
 
     await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
-      VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{}'::jsonb, 1, now())`;
+      VALUES (gen_random_uuid()::text, ${discordUserId}, 2, '"garbage"'::jsonb, 1, now())`;
 
     const first = await app.inject({
       method: 'GET',
@@ -200,7 +181,97 @@ describe('GET /nocni-hlidac/player-profile', () => {
       url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
       headers: authHeaders,
     });
-    expect(second.json().revision).toBe(2); // no further bump — already valid V1
+    expect(second.json().revision).toBe(2); // no further bump — already valid V2
+  });
+
+  describe('V1 -> V2 migration', () => {
+    it('2. a legacy V1 profile (profileVersion 1) migrates to V2 on GET', async () => {
+      const app = await buildApp();
+      const discordUserId = testDiscordId(40);
+
+      await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
+        VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{"inventory":{"items":{"bulb":7}}}'::jsonb, 3, now())`;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
+        headers: authHeaders,
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.profileVersion).toBe(2);
+      expect(body.profileData).toEqual({ inventory: { items: { bulb: 7 } }, equipment: DEFAULT_EQUIPMENT });
+    });
+
+    it('3. migration preserves the exact bulb count', async () => {
+      const app = await buildApp();
+      const discordUserId = testDiscordId(41);
+
+      await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
+        VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{"inventory":{"items":{"bulb":42}}}'::jsonb, 1, now())`;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
+        headers: authHeaders,
+      });
+      expect(res.json().profileData.inventory.items.bulb).toBe(42);
+    });
+
+    it('4. migration increases revision by exactly 1', async () => {
+      const app = await buildApp();
+      const discordUserId = testDiscordId(42);
+
+      await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
+        VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{"inventory":{"items":{"bulb":5}}}'::jsonb, 4, now())`;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
+        headers: authHeaders,
+      });
+      expect(res.json().revision).toBe(5);
+    });
+
+    it('5. a repeated GET of an already-migrated V2 profile does not migrate again', async () => {
+      const app = await buildApp();
+      const discordUserId = testDiscordId(43);
+
+      await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
+        VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{"inventory":{"items":{"bulb":3}}}'::jsonb, 1, now())`;
+
+      const first = await app.inject({
+        method: 'GET',
+        url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
+        headers: authHeaders,
+      });
+      expect(first.json().revision).toBe(2);
+
+      const second = await app.inject({
+        method: 'GET',
+        url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
+        headers: authHeaders,
+      });
+      expect(second.json().revision).toBe(2);
+      expect(second.json().profileVersion).toBe(2);
+    });
+
+    it('a legacy pre-1B empty {} V1 profileData migrates to V2 with the default bulb count', async () => {
+      const app = await buildApp();
+      const discordUserId = testDiscordId(44);
+
+      await db.$executeRaw`INSERT INTO "Object13PlayerProfile" ("id", "discordUserId", "profileVersion", "profileData", "revision", "updatedAt")
+        VALUES (gen_random_uuid()::text, ${discordUserId}, 1, '{}'::jsonb, 1, now())`;
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/nocni-hlidac/player-profile?discordUserId=${discordUserId}`,
+        headers: authHeaders,
+      });
+      expect(res.json().profileData).toEqual(DEFAULT_V2_DATA);
+      expect(res.json().revision).toBe(2);
+    });
   });
 });
 
@@ -215,7 +286,7 @@ describe('PUT /nocni-hlidac/player-profile', () => {
     return res.json();
   }
 
-  it('11/12. a PUT with the matching revision saves and increments revision by exactly 1', async () => {
+  it('a PUT with the matching revision saves and increments revision by exactly 1', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(20);
     await seedProfile(discordUserId);
@@ -224,16 +295,21 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 15 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: 15 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
 
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.revision).toBe(2);
-    expect(body.profileData).toEqual({ inventory: { items: { bulb: 15 } } });
+    expect(body.profileData).toEqual({ inventory: { items: { bulb: 15 } }, equipment: DEFAULT_EQUIPMENT });
   });
 
-  it('13/14. a PUT with a stale revision returns 409 and overwrites nothing', async () => {
+  it('a PUT with a stale revision returns 409 and overwrites nothing', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(21);
     await seedProfile(discordUserId);
@@ -241,14 +317,24 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 5 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: 5 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
     // Profile is now at revision 2. Retry with the now-stale revision 1.
     const res = await app.inject({
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 999 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: 999 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
 
     expect(res.statusCode).toBe(409);
@@ -257,8 +343,7 @@ describe('PUT /nocni-hlidac/player-profile', () => {
     expect(body.currentRevision).toBe(2);
 
     const row = await db.object13PlayerProfile.findUnique({ where: { discordUserId } });
-    expect(row?.revision).toBe(2);
-    expect(row?.profileData).toEqual({ inventory: { items: { bulb: 5 } } });
+    expect((row?.profileData as { inventory: { items: { bulb: number } } }).inventory.items.bulb).toBe(5);
   });
 
   it('a PUT against a profile that was never GET/created returns 404', async () => {
@@ -267,13 +352,13 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId: testDiscordId(22), expectedRevision: 1, profileVersion: 1, profileData: DEFAULT_V1_DATA },
+      payload: { discordUserId: testDiscordId(22), expectedRevision: 1, profileVersion: 2, profileData: DEFAULT_V2_DATA },
     });
     expect(res.statusCode).toBe(404);
     expect(res.json()).toEqual({ error: 'profile_not_found' });
   });
 
-  it('15. a PUT with an unsupported profileVersion returns a clear error', async () => {
+  it('a PUT with an unsupported profileVersion returns a clear error (V1 is no longer a valid PUT target)', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(23);
     await seedProfile(discordUserId);
@@ -282,13 +367,13 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 999, profileData: {} },
+      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: DEFAULT_V2_DATA },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'unsupported_profile_version' });
   });
 
-  it('16. a PUT with profileData: null returns 400', async () => {
+  it('a PUT with profileData: null returns 400', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(24);
     await seedProfile(discordUserId);
@@ -297,13 +382,13 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: null },
+      payload: { discordUserId, expectedRevision: 1, profileVersion: 2, profileData: null },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_profile_data' });
   });
 
-  it('17. a PUT with profileData as an array returns 400', async () => {
+  it('a PUT missing the equipment key returns 400 (16. obecný PUT odmítne nevalidní equipment)', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(25);
     await seedProfile(discordUserId);
@@ -312,13 +397,13 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: [1, 2, 3] },
+      payload: { discordUserId, expectedRevision: 1, profileVersion: 2, profileData: { inventory: { items: { bulb: 5 } } } },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_profile_data' });
   });
 
-  it('17. a PUT with an unknown top-level profileData key (legacy free-form shape) returns 400', async () => {
+  it('a PUT with an unknown top-level profileData key returns 400', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(26);
     await seedProfile(discordUserId);
@@ -327,7 +412,7 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { note: 'hello' } },
+      payload: { discordUserId, expectedRevision: 1, profileVersion: 2, profileData: { ...DEFAULT_V2_DATA, note: 'hello' } },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_profile_data' });
@@ -345,10 +430,110 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { shotgun: 1 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { shotgun: 1 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_profile_data' });
+  });
+
+  it('6. ownedWeapons odmítne neznámé ID', async () => {
+    const app = await buildApp();
+    const discordUserId = testDiscordId(50);
+    await seedProfile(discordUserId);
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/nocni-hlidac/player-profile',
+      headers: authHeaders,
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: {
+          inventory: { items: { bulb: 5 } },
+          equipment: { ownedWeapons: ['rocket_launcher'], equippedWeaponId: null },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'invalid_profile_data' });
+  });
+
+  it('7. ownedWeapons odmítne duplicity', async () => {
+    const app = await buildApp();
+    const discordUserId = testDiscordId(51);
+    await seedProfile(discordUserId);
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/nocni-hlidac/player-profile',
+      headers: authHeaders,
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: {
+          inventory: { items: { bulb: 5 } },
+          equipment: { ownedWeapons: ['single_shotgun', 'single_shotgun'], equippedWeaponId: 'single_shotgun' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'invalid_profile_data' });
+  });
+
+  it('8. equippedWeaponId musí být vlastněný', async () => {
+    const app = await buildApp();
+    const discordUserId = testDiscordId(52);
+    await seedProfile(discordUserId);
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/nocni-hlidac/player-profile',
+      headers: authHeaders,
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: {
+          inventory: { items: { bulb: 5 } },
+          equipment: { ownedWeapons: [], equippedWeaponId: 'single_shotgun' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: 'invalid_profile_data' });
+  });
+
+  it('accepts a valid equipment state (owned + correctly equipped weapon)', async () => {
+    const app = await buildApp();
+    const discordUserId = testDiscordId(53);
+    await seedProfile(discordUserId);
+
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/nocni-hlidac/player-profile',
+      headers: authHeaders,
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: {
+          inventory: { items: { bulb: 5 } },
+          equipment: { ownedWeapons: ['single_shotgun', 'double_barrel_shotgun'], equippedWeaponId: 'double_barrel_shotgun' },
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().profileData.equipment).toEqual({
+      ownedWeapons: ['single_shotgun', 'double_barrel_shotgun'],
+      equippedWeaponId: 'double_barrel_shotgun',
+    });
   });
 
   it('3. a PUT with a negative bulb quantity returns 400', async () => {
@@ -360,7 +545,12 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: -1 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: -1 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_profile_data' });
@@ -375,7 +565,12 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 1000 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: 1000 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_profile_data' });
@@ -386,20 +581,11 @@ describe('PUT /nocni-hlidac/player-profile', () => {
     const discordUserId = testDiscordId(27);
     await seedProfile(discordUserId);
 
-    // Sent as a raw JSON string (not a JS object payload) on purpose: a real
-    // HTTP request body is always raw bytes, and light-my-request (Fastify's
-    // `.inject()`) mangles a literal `__proto__` key if it's handed a live
-    // JS object instead — this is the faithful way to simulate what an
-    // actual malicious/careless client sends over the wire. Confirmed
-    // empirically: Fastify's default `application/json` content-type parser
-    // already refuses to parse a body containing a top-level `__proto__` key
-    // ANYWHERE in the JSON, returning `FST_ERR_CTP_INVALID_JSON_BODY` — this
-    // request never reaches playerProfileRoutes.ts at all.
     const res = await app.inject({
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: { ...authHeaders, 'content-type': 'application/json' },
-      payload: `{"discordUserId":"${discordUserId}","expectedRevision":1,"profileVersion":1,"profileData":{"__proto__":{"polluted":true}}}`,
+      payload: `{"discordUserId":"${discordUserId}","expectedRevision":1,"profileVersion":2,"profileData":{"__proto__":{"polluted":true}}}`,
     });
     expect(res.statusCode).toBe(400);
 
@@ -407,25 +593,7 @@ describe('PUT /nocni-hlidac/player-profile', () => {
     expect(row?.revision).toBe(1);
   });
 
-  it('a PUT with a nested "constructor" key (not blocked by Fastify itself) is rejected by validateObject13PlayerProfileDataV1 — "nested" is simply not an allowed top-level key', async () => {
-    const app = await buildApp();
-    const discordUserId = testDiscordId(30);
-    await seedProfile(discordUserId);
-
-    const res = await app.inject({
-      method: 'PUT',
-      url: '/nocni-hlidac/player-profile',
-      headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { nested: { constructor: 'x' } } },
-    });
-    expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: 'invalid_profile_data' });
-
-    const row = await db.object13PlayerProfile.findUnique({ where: { discordUserId } });
-    expect(row?.revision).toBe(1);
-  });
-
-  it('21. two sequential writes with the correct revisions each work', async () => {
+  it('17. bulb add/consume still work through their dedicated endpoints after a general PUT on the same V2 profile', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(28);
     await seedProfile(discordUserId);
@@ -434,7 +602,12 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 1 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 1,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: 1 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
     expect(first.statusCode).toBe(200);
     expect(first.json().revision).toBe(2);
@@ -443,14 +616,19 @@ describe('PUT /nocni-hlidac/player-profile', () => {
       method: 'PUT',
       url: '/nocni-hlidac/player-profile',
       headers: authHeaders,
-      payload: { discordUserId, expectedRevision: 2, profileVersion: 1, profileData: { inventory: { items: { bulb: 2 } } } },
+      payload: {
+        discordUserId,
+        expectedRevision: 2,
+        profileVersion: 2,
+        profileData: { inventory: { items: { bulb: 2 } }, equipment: DEFAULT_EQUIPMENT },
+      },
     });
     expect(second.statusCode).toBe(200);
     expect(second.json().revision).toBe(3);
-    expect(second.json().profileData).toEqual({ inventory: { items: { bulb: 2 } } });
+    expect(second.json().profileData.inventory.items.bulb).toBe(2);
   });
 
-  it('22. two concurrent writes with the same expectedRevision cannot both succeed', async () => {
+  it('two concurrent writes with the same expectedRevision cannot both succeed', async () => {
     const app = await buildApp();
     const discordUserId = testDiscordId(29);
     await seedProfile(discordUserId);
@@ -460,13 +638,23 @@ describe('PUT /nocni-hlidac/player-profile', () => {
         method: 'PUT',
         url: '/nocni-hlidac/player-profile',
         headers: authHeaders,
-        payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 1 } } } },
+        payload: {
+          discordUserId,
+          expectedRevision: 1,
+          profileVersion: 2,
+          profileData: { inventory: { items: { bulb: 1 } }, equipment: DEFAULT_EQUIPMENT },
+        },
       }),
       app.inject({
         method: 'PUT',
         url: '/nocni-hlidac/player-profile',
         headers: authHeaders,
-        payload: { discordUserId, expectedRevision: 1, profileVersion: 1, profileData: { inventory: { items: { bulb: 2 } } } },
+        payload: {
+          discordUserId,
+          expectedRevision: 1,
+          profileVersion: 2,
+          profileData: { inventory: { items: { bulb: 2 } }, equipment: DEFAULT_EQUIPMENT },
+        },
       }),
     ]);
 

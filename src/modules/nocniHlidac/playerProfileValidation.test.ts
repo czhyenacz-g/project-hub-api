@@ -4,7 +4,9 @@ import {
   Object13PlayerProfileGetQuerySchema,
   parseObject13PlayerProfileInventoryOperation,
   parseObject13PlayerProfileSyncEnvelope,
+  parseObject13PlayerProfileWeaponOperation,
   validateObject13PlayerProfileDataV1,
+  validateObject13PlayerProfileDataV2,
 } from './playerProfileValidation.js';
 import { OBJECT13_INVENTORY_ITEM_REGISTRY, OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES } from './playerProfileInventory.js';
 
@@ -212,5 +214,94 @@ describe('validateObject13PlayerProfileDataV1', () => {
 
   it('stays well under the size limit for any realistic inventory', () => {
     expect(JSON.stringify(VALID_V1_DATA).length).toBeLessThan(OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES);
+  });
+});
+
+describe('parseObject13PlayerProfileWeaponOperation', () => {
+  const valid = { discordUserId: '123456789012345678', weaponId: 'single_shotgun', expectedRevision: 1 };
+
+  it('accepts a well-formed body', () => {
+    expect(parseObject13PlayerProfileWeaponOperation(valid).success).toBe(true);
+  });
+
+  it('rejects a missing/empty weaponId', () => {
+    expect(parseObject13PlayerProfileWeaponOperation({ ...valid, weaponId: '' }).success).toBe(false);
+    const { weaponId: _omit, ...withoutWeaponId } = valid;
+    expect(parseObject13PlayerProfileWeaponOperation(withoutWeaponId).success).toBe(false);
+  });
+
+  it('rejects expectedRevision <= 0', () => {
+    expect(parseObject13PlayerProfileWeaponOperation({ ...valid, expectedRevision: 0 }).success).toBe(false);
+  });
+
+  it('rejects an invalid discordUserId', () => {
+    expect(parseObject13PlayerProfileWeaponOperation({ ...valid, discordUserId: 'not-a-snowflake' }).success).toBe(false);
+  });
+});
+
+const VALID_V2_DATA = { inventory: { items: { bulb: 10 } }, equipment: { ownedWeapons: [], equippedWeaponId: null } };
+
+describe('validateObject13PlayerProfileDataV2', () => {
+  it('accepts a well-formed empty-equipment profile', () => {
+    const result = validateObject13PlayerProfileDataV2(VALID_V2_DATA);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data).toEqual(VALID_V2_DATA);
+  });
+
+  it('accepts a profile with owned + equipped weapons', () => {
+    const data = {
+      inventory: { items: { bulb: 5 } },
+      equipment: { ownedWeapons: ['single_shotgun', 'double_barrel_shotgun'], equippedWeaponId: 'double_barrel_shotgun' },
+    };
+    expect(validateObject13PlayerProfileDataV2(data).ok).toBe(true);
+  });
+
+  it('rejects null/array/primitive', () => {
+    expect(validateObject13PlayerProfileDataV2(null).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV2([]).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV2('x').ok).toBe(false);
+  });
+
+  it('rejects a legacy V1 shape (missing equipment)', () => {
+    const result = validateObject13PlayerProfileDataV2({ inventory: { items: { bulb: 10 } } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('missing_equipment');
+  });
+
+  it('rejects a legacy empty {} object entirely', () => {
+    const result = validateObject13PlayerProfileDataV2({});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('missing_inventory');
+  });
+
+  it('rejects an unknown top-level key', () => {
+    const result = validateObject13PlayerProfileDataV2({ ...VALID_V2_DATA, extra: 1 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unknown_top_level_key');
+  });
+
+  it('rejects invalid inventory the same way V1 does', () => {
+    const result = validateObject13PlayerProfileDataV2({ inventory: { items: { bulb: -1 } }, equipment: { ownedWeapons: [], equippedWeaponId: null } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('quantity_out_of_range');
+  });
+
+  it('rejects invalid equipment, wrapping the underlying equipment error', () => {
+    const result = validateObject13PlayerProfileDataV2({
+      inventory: { items: { bulb: 5 } },
+      equipment: { ownedWeapons: ['rocket_launcher'], equippedWeaponId: null },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('equipment_invalid');
+      if (result.error.code === 'equipment_invalid') expect(result.error.error.code).toBe('unknown_weapon_id');
+    }
+  });
+
+  it('a top-level __proto__ key is rejected as an unknown key', () => {
+    const raw = JSON.parse('{"__proto__": {"polluted": true}}') as Record<string, unknown>;
+    const result = validateObject13PlayerProfileDataV2(raw);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unknown_top_level_key');
   });
 });

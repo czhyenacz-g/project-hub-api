@@ -75,8 +75,21 @@ export function createDefaultObject13PlayerProfileDataV1(): Object13PlayerProfil
   return { inventory: { items } };
 }
 
+// A shape with at least an `inventory.items` bag — both
+// `Object13PlayerProfileDataV1` (this file) and
+// `Object13PlayerProfileDataV2` (playerProfileContractV2.ts, adds
+// `equipment`) satisfy this structurally. The functions below are typed
+// against this narrower shape (not the V1 interface specifically) and use a
+// generic `<T extends ...>` so they can operate on a V2 profile WITHOUT this
+// module importing anything about equipment (no cycle back) — the caller's
+// extra fields (like `equipment`) are preserved via `...profileData` spread,
+// never dropped.
+interface WithInventoryItems {
+  inventory: { items: Object13InventoryItems };
+}
+
 /** Missing key = 0, never `undefined` propagated into arithmetic. */
-export function getInventoryItemQuantity(profileData: Object13PlayerProfileDataV1, itemId: Object13InventoryItemId): number {
+export function getInventoryItemQuantity(profileData: WithInventoryItems, itemId: Object13InventoryItemId): number {
   return profileData.inventory.items[itemId] ?? 0;
 }
 
@@ -87,40 +100,36 @@ export function normalizeInventoryQuantity(itemId: Object13InventoryItemId, rawQ
   return Math.min(def.maxQuantity, Math.max(def.minQuantity, rawQuantity));
 }
 
-export type AddInventoryItemResult =
-  | { ok: true; profileData: Object13PlayerProfileDataV1 }
-  | { ok: false; error: 'exceeds_maximum' };
+export type AddInventoryItemResult<T> = { ok: true; profileData: T } | { ok: false; error: 'exceeds_maximum' };
 
-/** Pure — does not touch the DB. amount must already be validated as a positive integer by the caller (see playerProfileInventoryValidation.ts). */
-export function addInventoryItem(
-  profileData: Object13PlayerProfileDataV1,
+/** Pure — does not touch the DB. amount must already be validated as a positive integer by the caller (see playerProfileInventoryValidation.ts). Generic over `T` so calling it with a V2 profile preserves `equipment` untouched. */
+export function addInventoryItem<T extends WithInventoryItems>(
+  profileData: T,
   itemId: Object13InventoryItemId,
   amount: number,
-): AddInventoryItemResult {
+): AddInventoryItemResult<T> {
   const def = OBJECT13_INVENTORY_ITEM_REGISTRY[itemId];
   const next = getInventoryItemQuantity(profileData, itemId) + amount;
   if (next > def.maxQuantity) return { ok: false, error: 'exceeds_maximum' };
   return {
     ok: true,
-    profileData: { inventory: { items: { ...profileData.inventory.items, [itemId]: next } } },
+    profileData: { ...profileData, inventory: { items: { ...profileData.inventory.items, [itemId]: next } } },
   };
 }
 
-export type ConsumeInventoryItemResult =
-  | { ok: true; profileData: Object13PlayerProfileDataV1 }
-  | { ok: false; error: 'insufficient_inventory' };
+export type ConsumeInventoryItemResult<T> = { ok: true; profileData: T } | { ok: false; error: 'insufficient_inventory' };
 
-/** Pure — does not touch the DB. amount must already be validated as a positive integer by the caller. */
-export function consumeInventoryItem(
-  profileData: Object13PlayerProfileDataV1,
+/** Pure — does not touch the DB. amount must already be validated as a positive integer by the caller. Generic over `T`, see addInventoryItem. */
+export function consumeInventoryItem<T extends WithInventoryItems>(
+  profileData: T,
   itemId: Object13InventoryItemId,
   amount: number,
-): ConsumeInventoryItemResult {
+): ConsumeInventoryItemResult<T> {
   const def = OBJECT13_INVENTORY_ITEM_REGISTRY[itemId];
   const next = getInventoryItemQuantity(profileData, itemId) - amount;
   if (next < def.minQuantity) return { ok: false, error: 'insufficient_inventory' };
   return {
     ok: true,
-    profileData: { inventory: { items: { ...profileData.inventory.items, [itemId]: next } } },
+    profileData: { ...profileData, inventory: { items: { ...profileData.inventory.items, [itemId]: next } } },
   };
 }

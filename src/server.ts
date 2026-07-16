@@ -9,6 +9,7 @@ import { nocniHlidacRoutes } from './modules/nocniHlidac/routes.js';
 import { nocniHlidacHardcoreProfileRoutes } from './modules/nocniHlidac/hardcoreProfileRoutes.js';
 import { nocniHlidacPlayerProfileRoutes } from './modules/nocniHlidac/playerProfileRoutes.js';
 import { nocniHlidacPlayerProfileInventoryRoutes } from './modules/nocniHlidac/playerProfileInventoryRoutes.js';
+import { nocniHlidacPlayerProfileEquipmentRoutes } from './modules/nocniHlidac/playerProfileEquipmentRoutes.js';
 import { attachSocketIO } from './ws/onlineGameSocket.js';
 
 const app = Fastify({ logger: true });
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   await app.register(nocniHlidacHardcoreProfileRoutes);
   await app.register(nocniHlidacPlayerProfileRoutes);
   await app.register(nocniHlidacPlayerProfileInventoryRoutes);
+  await app.register(nocniHlidacPlayerProfileEquipmentRoutes);
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
 

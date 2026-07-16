@@ -6,6 +6,8 @@ import {
   OBJECT13_INVENTORY_ITEM_REGISTRY,
   OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES,
 } from './playerProfileInventory.js';
+import { Object13PlayerProfileDataV2 } from './playerProfileContractV2.js';
+import { EquipmentValidationError, validateEquipmentState } from './playerProfileEquipment.js';
 
 // Stricter than the existing NocniHlidacDiscordUserIdSchema (validation.ts,
 // `z.string().min(1)`) / HardcoreProfileGetQuerySchema (hardcoreProfileValidation.ts,
@@ -145,6 +147,113 @@ export function validateObject13PlayerProfileDataV1(raw: unknown): Object13Playe
   }
 
   const data: Object13PlayerProfileDataV1 = { inventory: { items: validatedItems } };
+  const sizeBytes = Buffer.byteLength(JSON.stringify(data), 'utf8');
+  if (sizeBytes > OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES) {
+    return { ok: false, error: { code: 'too_large', sizeBytes } };
+  }
+
+  return { ok: true, data };
+}
+
+// Body schema for POST /nocni-hlidac/player-profile/equipment/weapon/unlock|equip.
+// Same `discordUserId`-from-server-to-server-layer convention as the
+// inventory operation schema above.
+const Object13PlayerProfileWeaponOperationSchema = z.object({
+  discordUserId: DiscordSnowflakeIdSchema,
+  weaponId: z.string().min(1),
+  expectedRevision: z.number().int().positive(),
+});
+export type Object13PlayerProfileWeaponOperationInput = z.infer<typeof Object13PlayerProfileWeaponOperationSchema>;
+
+/**
+ * `weaponId` is only checked for "non-empty string" here — the ROUTE
+ * validates it against `isWeaponId` (playerProfileEquipment.ts) separately,
+ * same "envelope vs content" split as the inventory operation schema/route.
+ */
+export function parseObject13PlayerProfileWeaponOperation(
+  raw: unknown,
+): z.SafeParseReturnType<unknown, Object13PlayerProfileWeaponOperationInput> {
+  return Object13PlayerProfileWeaponOperationSchema.safeParse(raw);
+}
+
+export type Object13PlayerProfileDataV2ValidationError =
+  | { code: 'not_object' }
+  | { code: 'unknown_top_level_key'; key: string }
+  | { code: 'missing_inventory' }
+  | { code: 'inventory_not_object' }
+  | { code: 'unknown_inventory_key'; key: string }
+  | { code: 'missing_items' }
+  | { code: 'items_not_object' }
+  | { code: 'unknown_item_id'; itemId: string }
+  | { code: 'invalid_quantity'; itemId: string }
+  | { code: 'quantity_out_of_range'; itemId: string }
+  | { code: 'missing_equipment' }
+  | { code: 'equipment_invalid'; error: EquipmentValidationError }
+  | { code: 'too_large'; sizeBytes: number };
+
+export type Object13PlayerProfileDataV2ValidationResult =
+  | { ok: true; data: Object13PlayerProfileDataV2 }
+  | { ok: false; error: Object13PlayerProfileDataV2ValidationError };
+
+const ALLOWED_V2_TOP_LEVEL_KEYS = new Set(['inventory', 'equipment']);
+
+/**
+ * Strict, fully-whitelisted validation of `profileData` against the V2
+ * contract (`Object13PlayerProfileDataV2` — see playerProfileContractV2.ts).
+ * Same principle as `validateObject13PlayerProfileDataV1` above (inventory
+ * checks are deliberately duplicated here rather than shared, so a future
+ * change to V1-only migration-detection logic can never accidentally affect
+ * V2 validation, and vice versa — V1 is now legacy/migration-only, V2 is the
+ * live contract) — `equipment` is delegated to
+ * `validateEquipmentState` (playerProfileEquipment.ts), the one place that
+ * knows the weapon registry/invariants.
+ */
+export function validateObject13PlayerProfileDataV2(raw: unknown): Object13PlayerProfileDataV2ValidationResult {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return { ok: false, error: { code: 'not_object' } };
+  }
+  const rawObj = raw as Record<string, unknown>;
+
+  for (const key of Object.keys(rawObj)) {
+    if (!ALLOWED_V2_TOP_LEVEL_KEYS.has(key)) return { ok: false, error: { code: 'unknown_top_level_key', key } };
+  }
+  if (!('inventory' in rawObj)) return { ok: false, error: { code: 'missing_inventory' } };
+  if (!('equipment' in rawObj)) return { ok: false, error: { code: 'missing_equipment' } };
+
+  const inventory = rawObj.inventory;
+  if (typeof inventory !== 'object' || inventory === null || Array.isArray(inventory)) {
+    return { ok: false, error: { code: 'inventory_not_object' } };
+  }
+  const inventoryObj = inventory as Record<string, unknown>;
+
+  for (const key of Object.keys(inventoryObj)) {
+    if (!ALLOWED_INVENTORY_KEYS.has(key)) return { ok: false, error: { code: 'unknown_inventory_key', key } };
+  }
+  if (!('items' in inventoryObj)) return { ok: false, error: { code: 'missing_items' } };
+
+  const items = inventoryObj.items;
+  if (typeof items !== 'object' || items === null || Array.isArray(items)) {
+    return { ok: false, error: { code: 'items_not_object' } };
+  }
+  const itemsObj = items as Record<string, unknown>;
+
+  const validatedItems: Object13InventoryItems = {};
+  for (const [itemId, rawQuantity] of Object.entries(itemsObj)) {
+    if (!isObject13InventoryItemId(itemId)) return { ok: false, error: { code: 'unknown_item_id', itemId } };
+    if (typeof rawQuantity !== 'number' || !Number.isInteger(rawQuantity)) {
+      return { ok: false, error: { code: 'invalid_quantity', itemId } };
+    }
+    const def = OBJECT13_INVENTORY_ITEM_REGISTRY[itemId];
+    if (rawQuantity < def.minQuantity || rawQuantity > def.maxQuantity) {
+      return { ok: false, error: { code: 'quantity_out_of_range', itemId } };
+    }
+    validatedItems[itemId] = rawQuantity;
+  }
+
+  const equipmentResult = validateEquipmentState(rawObj.equipment);
+  if (!equipmentResult.ok) return { ok: false, error: { code: 'equipment_invalid', error: equipmentResult.error } };
+
+  const data: Object13PlayerProfileDataV2 = { inventory: { items: validatedItems }, equipment: equipmentResult.equipment };
   const sizeBytes = Buffer.byteLength(JSON.stringify(data), 'utf8');
   if (sizeBytes > OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES) {
     return { ok: false, error: { code: 'too_large', sizeBytes } };

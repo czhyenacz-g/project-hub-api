@@ -7,7 +7,10 @@ import {
   OBJECT13_PLAYER_PROFILE_VERSION,
   toObject13PlayerProfileDto,
 } from './playerProfileTypes.js';
-import { validateObject13PlayerProfileDataV1 } from './playerProfileValidation.js';
+import { validateObject13PlayerProfileDataV1, validateObject13PlayerProfileDataV2 } from './playerProfileValidation.js';
+import { createDefaultObject13PlayerProfileDataV1, getInventoryItemQuantity } from './playerProfileInventory.js';
+import { Object13PlayerProfileDataV2 } from './playerProfileContractV2.js';
+import { createDefaultEquipmentState } from './playerProfileEquipment.js';
 
 /**
  * GET /nocni-hlidac/player-profile — find-or-create a default profile, touch
@@ -16,15 +19,22 @@ import { validateObject13PlayerProfileDataV1 } from './playerProfileValidation.j
  * mode-agnostic Object13PlayerProfile — a completely separate table, no
  * shared code path with the Hardcore profile or the leaderboard.
  *
- * Also normalizes a legacy/invalid stored profileData (a pre-1B empty `{}`
- * row, or any row that no longer strictly validates as V1) to the current
- * default V1 shape AND PERSISTS that fix — but only when the stored value
- * actually fails validation, so revision never churns on a GET of an
- * already-valid profile (see task spec "revision zvyš pouze tehdy, pokud se
- * profil skutečně mění"). Uses the same optimistic-locked `updateMany` as
- * updateObject13PlayerProfile below; losing a race here just means another
- * caller already normalized (or moved past) this row, so the loss is
- * harmless and the row is simply re-read.
+ * Two independent repair paths, both using the same optimistic-locked
+ * `updateMany` as updateObject13PlayerProfile below (losing a race just
+ * means another caller already fixed — or moved past — this row, harmless,
+ * row is simply re-read):
+ *
+ * 1. `profileVersion === 1` (see task spec "5. Serverová migrace V1 na V2")
+ *    — migrates to V2, preserving the EXACT bulb count (a V1 row that
+ *    doesn't even validate as V1, e.g. the old pre-1B `{}`, is treated as
+ *    "no bulbs recorded" and falls back to the V1 default count — never
+ *    silently invented beyond that, never lost). Equipment starts empty
+ *    (V1 never had any). `profileVersion` becomes 2, revision +1.
+ * 2. `profileVersion === 2` but the stored `profileData` doesn't strictly
+ *    validate as V2 (corrupted/hand-edited row) — normalizes to the default
+ *    V2 profile, revision +1. Runs only when the stored value actually
+ *    fails validation, so revision never churns on a GET of an
+ *    already-valid profile.
  */
 export async function getOrCreateObject13PlayerProfile(discordUserId: string): Promise<Object13PlayerProfileDto> {
   const now = new Date();
@@ -39,8 +49,27 @@ export async function getOrCreateObject13PlayerProfile(discordUserId: string): P
     },
   });
 
-  if (row.profileVersion === OBJECT13_PLAYER_PROFILE_VERSION && !validateObject13PlayerProfileDataV1(row.profileData).ok) {
-    const normalized = await db.object13PlayerProfile.updateMany({
+  if (row.profileVersion === 1) {
+    const v1Validated = validateObject13PlayerProfileDataV1(row.profileData);
+    const bulbCount = v1Validated.ok
+      ? getInventoryItemQuantity(v1Validated.data, 'bulb')
+      : (createDefaultObject13PlayerProfileDataV1().inventory.items.bulb ?? 0);
+    const migrated: Object13PlayerProfileDataV2 = {
+      inventory: { items: { bulb: bulbCount } },
+      equipment: createDefaultEquipmentState(),
+    };
+    await db.object13PlayerProfile.updateMany({
+      where: { discordUserId, revision: row.revision },
+      data: {
+        profileVersion: OBJECT13_PLAYER_PROFILE_VERSION,
+        profileData: migrated as unknown as Prisma.InputJsonValue,
+        revision: { increment: 1 },
+        lastSeenAt: now,
+      },
+    });
+    row = await db.object13PlayerProfile.findUniqueOrThrow({ where: { discordUserId } });
+  } else if (row.profileVersion === OBJECT13_PLAYER_PROFILE_VERSION && !validateObject13PlayerProfileDataV2(row.profileData).ok) {
+    await db.object13PlayerProfile.updateMany({
       where: { discordUserId, revision: row.revision },
       data: {
         profileData: createDefaultObject13PlayerProfileData() as unknown as Prisma.InputJsonValue,

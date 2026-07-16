@@ -1,12 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { db } from '../../db.js';
 import { Object13PlayerProfileDto, normalizeObject13PlayerProfileData, toObject13PlayerProfileDto } from './playerProfileTypes.js';
-import {
-  addInventoryItem,
-  consumeInventoryItem,
-  Object13InventoryItemId,
-  Object13PlayerProfileDataV1,
-} from './playerProfileInventory.js';
+import { addInventoryItem, consumeInventoryItem, Object13InventoryItemId } from './playerProfileInventory.js';
+import { Object13PlayerProfileDataV2 } from './playerProfileContractV2.js';
 
 export type Object13PlayerProfileInventoryOperationResult =
   | { outcome: 'updated'; profile: Object13PlayerProfileDto }
@@ -16,10 +12,10 @@ export type Object13PlayerProfileInventoryOperationResult =
   | { outcome: 'insufficient_inventory' };
 
 type PureInventoryOp = (
-  profileData: Object13PlayerProfileDataV1,
+  profileData: Object13PlayerProfileDataV2,
   itemId: Object13InventoryItemId,
   amount: number,
-) => { ok: true; profileData: Object13PlayerProfileDataV1 } | { ok: false; error: 'exceeds_maximum' | 'insufficient_inventory' };
+) => { ok: true; profileData: Object13PlayerProfileDataV2 } | { ok: false; error: 'exceeds_maximum' | 'insufficient_inventory' };
 
 /**
  * Shared implementation for both add and consume — same optimistic-locking
