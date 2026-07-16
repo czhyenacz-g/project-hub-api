@@ -8,6 +8,7 @@ import { trainingChallengeRoutes } from './modules/osmaLiga/trainingChallengeRou
 import { nocniHlidacRoutes } from './modules/nocniHlidac/routes.js';
 import { nocniHlidacHardcoreProfileRoutes } from './modules/nocniHlidac/hardcoreProfileRoutes.js';
 import { nocniHlidacPlayerProfileRoutes } from './modules/nocniHlidac/playerProfileRoutes.js';
+import { nocniHlidacPlayerProfileInventoryRoutes } from './modules/nocniHlidac/playerProfileInventoryRoutes.js';
 import { attachSocketIO } from './ws/onlineGameSocket.js';
 
 const app = Fastify({ logger: true });
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
   await app.register(nocniHlidacRoutes);
   await app.register(nocniHlidacHardcoreProfileRoutes);
   await app.register(nocniHlidacPlayerProfileRoutes);
+  await app.register(nocniHlidacPlayerProfileInventoryRoutes);
 
   await app.listen({ port: config.port, host: '0.0.0.0' });
 

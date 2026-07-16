@@ -5,6 +5,9 @@
 // reward/stats, see hardcoreProfileService.ts) — no shared code, no shared
 // table, connected only by the same discordUserId string convention.
 
+import { createDefaultObject13PlayerProfileDataV1, Object13PlayerProfileDataV1 } from './playerProfileInventory.js';
+import { validateObject13PlayerProfileDataV1 } from './playerProfileValidation.js';
+
 export const OBJECT13_PLAYER_PROFILE_VERSION = 1;
 
 // Every profileVersion this server currently knows how to read/write. A PUT
@@ -17,35 +20,34 @@ export function isSupportedObject13PlayerProfileVersion(version: number): boolea
   return OBJECT13_PLAYER_PROFILE_SUPPORTED_VERSIONS.includes(version);
 }
 
-// Conservative MVP cap on the serialized (JSON.stringify, UTF-8 byte length)
-// size of profileData — named constant so it's easy to find/tune later, see
-// playerProfileValidation.ts#validateObject13PlayerProfileData.
-export const OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES = 32 * 1024; // 32 KB
+// profileVersion 1's exact contract (see playerProfileInventory.ts) — the
+// opaque `Record<string, unknown>` shape from step 1A is gone now that
+// there's a real, validated content for profileData.
+export type Object13PlayerProfileData = Object13PlayerProfileDataV1;
 
-export type Object13PlayerProfileData = Record<string, unknown>;
-
-// Single source of truth for "what a brand new profile looks like" — step 1A
-// intentionally ships this EMPTY. Bulbs/weapons/settings/officeEquipment/
-// progression are a later step (1B+), never invented here.
+// Single source of truth for "what a brand new profile looks like" — step 1B
+// gives it real starting content (the default inventory, see
+// playerProfileInventory.ts#createDefaultObject13PlayerProfileDataV1). Never
+// an empty `{}` — see task spec "Nepoužívej prázdný objekt jako nový výchozí
+// profil."
 export function createDefaultObject13PlayerProfileData(): Object13PlayerProfileData {
-  return {};
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return createDefaultObject13PlayerProfileDataV1();
 }
 
 /**
  * Whatever Prisma's `Json` column returns (`Prisma.JsonValue`, effectively
- * `unknown`) coerced into a safe plain object — `null`/array/string/number/
- * boolean/anything that isn't a plain object becomes `{}`. Defense-in-depth
- * for a row written by a future/older app version or edited by hand — a
- * value written through updateObject13PlayerProfile is already known-good
- * (see playerProfileValidation.ts), but reading must never trust the DB
- * blindly either, same principle as hardcoreProfileMerge.ts#sanitizeHardcoreDeathsByNight.
+ * `unknown`) coerced into a valid V1 profile — anything that doesn't
+ * strictly validate (a pre-1B empty `{}` row, `null`/array/string/number/
+ * boolean, or a hand-edited/corrupted row) becomes the default V1 profile.
+ * Defense-in-depth for reading, same principle as
+ * hardcoreProfileMerge.ts#sanitizeHardcoreDeathsByNight — but see
+ * playerProfileService.ts#getOrCreateObject13PlayerProfile for where this
+ * gets PERSISTED back (with a revision bump) rather than just silently
+ * reshaped in the response.
  */
 export function normalizeObject13PlayerProfileData(value: unknown): Object13PlayerProfileData {
-  return isPlainObject(value) ? value : createDefaultObject13PlayerProfileData();
+  const validated = validateObject13PlayerProfileDataV1(value);
+  return validated.ok ? validated.data : createDefaultObject13PlayerProfileDataV1();
 }
 
 // Response contract for GET/PUT /nocni-hlidac/player-profile. No internal

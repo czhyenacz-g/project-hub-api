@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES, Object13PlayerProfileData } from './playerProfileTypes.js';
+import {
+  isObject13InventoryItemId,
+  Object13InventoryItems,
+  Object13PlayerProfileDataV1,
+  OBJECT13_INVENTORY_ITEM_REGISTRY,
+  OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES,
+} from './playerProfileInventory.js';
 
 // Stricter than the existing NocniHlidacDiscordUserIdSchema (validation.ts,
 // `z.string().min(1)`) / HardcoreProfileGetQuerySchema (hardcoreProfileValidation.ts,
@@ -46,89 +52,103 @@ export function parseObject13PlayerProfileSyncEnvelope(raw: unknown): z.SafePars
   return Object13PlayerProfileSyncEnvelopeSchema.safeParse(raw);
 }
 
-const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+// Body schema for POST /nocni-hlidac/player-profile/inventory/:itemId/add|consume.
+// `discordUserId` arrives here the same way as the general PUT — filled in
+// by the server-to-server layer (the game client's own Next.js proxy, from
+// its session), never trusted from a browser directly (see
+// playerProfileInventoryRoutes.ts).
+const Object13PlayerProfileInventoryOperationSchema = z.object({
+  discordUserId: DiscordSnowflakeIdSchema,
+  amount: z.number().int().positive(),
+  expectedRevision: z.number().int().positive(),
+});
+export type Object13PlayerProfileInventoryOperationInput = z.infer<typeof Object13PlayerProfileInventoryOperationSchema>;
 
-/**
- * Recursively looks for `__proto__`/`constructor`/`prototype` as an OWN key
- * anywhere in a JSON value (object keys and array elements) — a JSON body
- * parsed via `JSON.parse` (which Fastify's body parser uses internally)
- * assigns `"__proto__"` as a normal own property, not the actual prototype
- * pollution vector, but this endpoint blocks it anyway on principle (see
- * task spec) since `profileData` will eventually be read back and merged
- * into real objects by future (1B+) code this step can't see yet.
- * `seen` guards against cycles — defense-in-depth; a value that reached this
- * point already passed through `JSON.parse`, which can't produce cycles.
- */
-function findDangerousKey(value: unknown, seen: WeakSet<object> = new WeakSet()): string | null {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findDangerousKey(item, seen);
-      if (found) return found;
-    }
-    return null;
-  }
-  if (typeof value !== 'object' || value === null) return null;
-  if (seen.has(value)) return null;
-  seen.add(value);
-
-  for (const key of Object.keys(value as Record<string, unknown>)) {
-    if (DANGEROUS_KEYS.has(key)) return key;
-    const found = findDangerousKey((value as Record<string, unknown>)[key], seen);
-    if (found) return found;
-  }
-  return null;
+export function parseObject13PlayerProfileInventoryOperation(
+  raw: unknown,
+): z.SafeParseReturnType<unknown, Object13PlayerProfileInventoryOperationInput> {
+  return Object13PlayerProfileInventoryOperationSchema.safeParse(raw);
 }
 
-export type Object13PlayerProfileDataValidationError =
+export type Object13PlayerProfileDataV1ValidationError =
   | { code: 'not_object' }
-  | { code: 'dangerous_key'; key: string }
-  | { code: 'not_serializable' }
+  | { code: 'unknown_top_level_key'; key: string }
+  | { code: 'missing_inventory' }
+  | { code: 'inventory_not_object' }
+  | { code: 'unknown_inventory_key'; key: string }
+  | { code: 'missing_items' }
+  | { code: 'items_not_object' }
+  | { code: 'unknown_item_id'; itemId: string }
+  | { code: 'invalid_quantity'; itemId: string }
+  | { code: 'quantity_out_of_range'; itemId: string }
   | { code: 'too_large'; sizeBytes: number };
 
-export type Object13PlayerProfileDataValidationResult =
-  | { ok: true; data: Object13PlayerProfileData; sizeBytes: number }
-  | { ok: false; error: Object13PlayerProfileDataValidationError };
+export type Object13PlayerProfileDataV1ValidationResult =
+  | { ok: true; data: Object13PlayerProfileDataV1 }
+  | { ok: false; error: Object13PlayerProfileDataV1ValidationError };
+
+const ALLOWED_TOP_LEVEL_KEYS = new Set(['inventory']);
+const ALLOWED_INVENTORY_KEYS = new Set(['items']);
 
 /**
- * Strict validation for the actual `profileData` payload — deliberately NOT
- * a lenient silent-fallback like hardcoreProfileValidation.ts#sanitizeIncomingHardcoreSnapshot
- * (per the task spec: "nepoužívat lenientní silent fallback jako Hardcore
- * sync"). Any failure here must become a real 400/413, never a quietly
- * substituted default.
- *
- * Order: plain-object shape -> dangerous keys -> JSON-serializability ->
- * size. `JSON.stringify` doubles as both the serializability check (it
- * returns `undefined`, not a string, for values it silently drops — e.g. a
- * bare function/symbol/`undefined` at the top level — and throws on
- * circular references, which a same-process object literal from a parsed
- * JSON body can't have but a future caller passing something else in theory
- * could) and the exact byte size measurement the route needs to enforce
- * `OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES`.
+ * Strict, fully-whitelisted validation of `profileData` against the V1
+ * contract (`Object13PlayerProfileDataV1` — see playerProfileInventory.ts).
+ * Deliberately NOT a lenient silent-fallback (per the task spec: "žádný
+ * silent fallback") — any shape mismatch is a real 400, never a quietly
+ * substituted default. Replaces the earlier step-1A opaque
+ * `validateObject13PlayerProfileData` (arbitrary-object + dangerous-key
+ * scan) now that profileVersion 1 has one exact known shape: because every
+ * accepted key is an explicit literal (`"inventory"`, `"items"`, a finite
+ * set of item ids) a `__proto__`/`constructor`/`prototype` key can never
+ * pass this validator — it's rejected as an unknown key long before any
+ * recursive dangerous-key scan would be needed.
  */
-export function validateObject13PlayerProfileData(raw: unknown): Object13PlayerProfileDataValidationResult {
+export function validateObject13PlayerProfileDataV1(raw: unknown): Object13PlayerProfileDataV1ValidationResult {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return { ok: false, error: { code: 'not_object' } };
   }
+  const rawObj = raw as Record<string, unknown>;
 
-  const dangerousKey = findDangerousKey(raw);
-  if (dangerousKey) {
-    return { ok: false, error: { code: 'dangerous_key', key: dangerousKey } };
+  for (const key of Object.keys(rawObj)) {
+    if (!ALLOWED_TOP_LEVEL_KEYS.has(key)) return { ok: false, error: { code: 'unknown_top_level_key', key } };
+  }
+  if (!('inventory' in rawObj)) return { ok: false, error: { code: 'missing_inventory' } };
+
+  const inventory = rawObj.inventory;
+  if (typeof inventory !== 'object' || inventory === null || Array.isArray(inventory)) {
+    return { ok: false, error: { code: 'inventory_not_object' } };
+  }
+  const inventoryObj = inventory as Record<string, unknown>;
+
+  for (const key of Object.keys(inventoryObj)) {
+    if (!ALLOWED_INVENTORY_KEYS.has(key)) return { ok: false, error: { code: 'unknown_inventory_key', key } };
+  }
+  if (!('items' in inventoryObj)) return { ok: false, error: { code: 'missing_items' } };
+
+  const items = inventoryObj.items;
+  if (typeof items !== 'object' || items === null || Array.isArray(items)) {
+    return { ok: false, error: { code: 'items_not_object' } };
+  }
+  const itemsObj = items as Record<string, unknown>;
+
+  const validatedItems: Object13InventoryItems = {};
+  for (const [itemId, rawQuantity] of Object.entries(itemsObj)) {
+    if (!isObject13InventoryItemId(itemId)) return { ok: false, error: { code: 'unknown_item_id', itemId } };
+    if (typeof rawQuantity !== 'number' || !Number.isInteger(rawQuantity)) {
+      return { ok: false, error: { code: 'invalid_quantity', itemId } };
+    }
+    const def = OBJECT13_INVENTORY_ITEM_REGISTRY[itemId];
+    if (rawQuantity < def.minQuantity || rawQuantity > def.maxQuantity) {
+      return { ok: false, error: { code: 'quantity_out_of_range', itemId } };
+    }
+    validatedItems[itemId] = rawQuantity;
   }
 
-  let serialized: string | undefined;
-  try {
-    serialized = JSON.stringify(raw);
-  } catch {
-    return { ok: false, error: { code: 'not_serializable' } };
-  }
-  if (serialized === undefined) {
-    return { ok: false, error: { code: 'not_serializable' } };
-  }
-
-  const sizeBytes = Buffer.byteLength(serialized, 'utf8');
+  const data: Object13PlayerProfileDataV1 = { inventory: { items: validatedItems } };
+  const sizeBytes = Buffer.byteLength(JSON.stringify(data), 'utf8');
   if (sizeBytes > OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES) {
     return { ok: false, error: { code: 'too_large', sizeBytes } };
   }
 
-  return { ok: true, data: raw as Object13PlayerProfileData, sizeBytes };
+  return { ok: true, data };
 }

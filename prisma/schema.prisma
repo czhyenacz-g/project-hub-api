@@ -180,9 +180,18 @@ model Object13HardcorePlayerProfile {
 // convention (no @relation/foreign key on purpose, see report — introducing
 // one now would be a bigger identity refactor out of scope for this step).
 //
-// `profileData` is an intentionally empty, opaque JSON bucket for now — no
-// real game data (bulbs, weapons, settings, inventory) moves here yet, see
-// src/modules/nocniHlidac/playerProfileTypes.ts#createDefaultObject13PlayerProfileData.
+// `profileData` holds the versioned Object13PlayerProfileDataV1 contract
+// (inventory of countable items, first item is spare bulbs) — see
+// src/modules/nocniHlidac/playerProfileInventory.ts and
+// playerProfileTypes.ts#createDefaultObject13PlayerProfileData. The column
+// default below is a STATIC fallback only (Postgres can't call application
+// code) — the application's own factory
+// (createDefaultObject13PlayerProfileDataV1) is the real source of truth for
+// what a new profile looks like; every row is actually created through
+// getOrCreateObject13PlayerProfile, which always writes that factory's
+// output explicitly, so this column default is never hit in practice. It
+// only needs to change if it drifts badly enough from the factory to matter
+// for some hypothetical row inserted outside the app.
 // `revision` exists from day one for optimistic locking on PUT (see
 // playerProfileService.ts#updateObject13PlayerProfile) — callers must supply
 // the revision they last read; a stale value is rejected (409), never
@@ -191,7 +200,7 @@ model Object13PlayerProfile {
   id             String   @id @default(cuid())
   discordUserId  String   @unique
   profileVersion Int      @default(1)
-  profileData    Json     @default("{}")
+  profileData    Json     @default("{\"inventory\":{\"items\":{\"bulb\":10}}}")
   revision       Int      @default(1)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt

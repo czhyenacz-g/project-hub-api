@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES } from './playerProfileTypes.js';
 import {
   DiscordSnowflakeIdSchema,
   Object13PlayerProfileGetQuerySchema,
+  parseObject13PlayerProfileInventoryOperation,
   parseObject13PlayerProfileSyncEnvelope,
-  validateObject13PlayerProfileData,
+  validateObject13PlayerProfileDataV1,
 } from './playerProfileValidation.js';
+import { OBJECT13_INVENTORY_ITEM_REGISTRY, OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES } from './playerProfileInventory.js';
 
 describe('DiscordSnowflakeIdSchema', () => {
   it('accepts a realistic 18-digit snowflake', () => {
@@ -48,12 +49,14 @@ describe('Object13PlayerProfileGetQuerySchema', () => {
   });
 });
 
+const VALID_V1_DATA = { inventory: { items: { bulb: 10 } } };
+
 describe('parseObject13PlayerProfileSyncEnvelope', () => {
   const valid = {
     discordUserId: '123456789012345678',
     expectedRevision: 1,
     profileVersion: 1,
-    profileData: {},
+    profileData: VALID_V1_DATA,
   };
 
   it('accepts a well-formed envelope', () => {
@@ -87,84 +90,127 @@ describe('parseObject13PlayerProfileSyncEnvelope', () => {
     expect(parseObject13PlayerProfileSyncEnvelope({ ...valid, profileVersion: 0 }).success).toBe(false);
   });
 
-  it('lets a missing profileData key through as undefined at the envelope level — validateObject13PlayerProfileData rejects it downstream (see below)', () => {
+  it('lets a missing profileData key through as undefined at the envelope level — validateObject13PlayerProfileDataV1 rejects it downstream (see below)', () => {
     const { profileData: _omit, ...withoutProfileData } = valid;
     const result = parseObject13PlayerProfileSyncEnvelope(withoutProfileData);
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(validateObject13PlayerProfileData(result.data.profileData).ok).toBe(false);
+      expect(validateObject13PlayerProfileDataV1(result.data.profileData).ok).toBe(false);
     }
   });
 });
 
-describe('validateObject13PlayerProfileData', () => {
-  it('accepts an empty object', () => {
-    const result = validateObject13PlayerProfileData({});
+describe('parseObject13PlayerProfileInventoryOperation', () => {
+  const valid = { discordUserId: '123456789012345678', amount: 1, expectedRevision: 1 };
+
+  it('accepts a well-formed body', () => {
+    expect(parseObject13PlayerProfileInventoryOperation(valid).success).toBe(true);
+  });
+
+  it('rejects amount <= 0', () => {
+    expect(parseObject13PlayerProfileInventoryOperation({ ...valid, amount: 0 }).success).toBe(false);
+    expect(parseObject13PlayerProfileInventoryOperation({ ...valid, amount: -1 }).success).toBe(false);
+  });
+
+  it('rejects a non-integer amount', () => {
+    expect(parseObject13PlayerProfileInventoryOperation({ ...valid, amount: 1.5 }).success).toBe(false);
+  });
+
+  it('rejects expectedRevision <= 0', () => {
+    expect(parseObject13PlayerProfileInventoryOperation({ ...valid, expectedRevision: 0 }).success).toBe(false);
+  });
+
+  it('rejects an invalid discordUserId', () => {
+    expect(parseObject13PlayerProfileInventoryOperation({ ...valid, discordUserId: 'not-a-snowflake' }).success).toBe(false);
+  });
+});
+
+describe('validateObject13PlayerProfileDataV1', () => {
+  it('1. accepts a well-formed profile with the bulb item', () => {
+    const result = validateObject13PlayerProfileDataV1(VALID_V1_DATA);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data).toEqual({});
+    if (result.ok) expect(result.data).toEqual(VALID_V1_DATA);
   });
 
-  it('accepts a small nested plain object', () => {
-    const result = validateObject13PlayerProfileData({ a: 1, b: { c: 'x' }, d: [1, 2, 3] });
+  it('accepts an empty items object (no items at all is a valid, if unusual, V1 profile)', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: {} } });
     expect(result.ok).toBe(true);
   });
 
-  it('rejects null', () => {
-    const result = validateObject13PlayerProfileData(null);
+  it('rejects null/array/string/number/boolean', () => {
+    expect(validateObject13PlayerProfileDataV1(null).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV1([]).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV1('x').ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV1(42).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV1(true).ok).toBe(false);
+  });
+
+  it('5. rejects an unknown top-level key (e.g. an old free-form field)', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: { bulb: 10 } }, totalDeaths: 5 });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('not_object');
+    if (!result.ok) expect(result.error.code).toBe('unknown_top_level_key');
   });
 
-  it('rejects an array', () => {
-    const result = validateObject13PlayerProfileData([1, 2, 3]);
+  it('rejects a legacy empty object {} (missing inventory)', () => {
+    const result = validateObject13PlayerProfileDataV1({});
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('not_object');
+    if (!result.ok) expect(result.error.code).toBe('missing_inventory');
   });
 
-  it('rejects a string/number/boolean', () => {
-    expect(validateObject13PlayerProfileData('x').ok).toBe(false);
-    expect(validateObject13PlayerProfileData(42).ok).toBe(false);
-    expect(validateObject13PlayerProfileData(true).ok).toBe(false);
+  it('rejects inventory that is not an object', () => {
+    expect(validateObject13PlayerProfileDataV1({ inventory: 'nope' }).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV1({ inventory: [] }).ok).toBe(false);
   });
 
-  it('rejects a top-level __proto__ key', () => {
+  it('rejects an unknown key inside inventory', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: {}, extra: 1 } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unknown_inventory_key');
+  });
+
+  it('rejects items that is not an object', () => {
+    expect(validateObject13PlayerProfileDataV1({ inventory: { items: 'nope' } }).ok).toBe(false);
+    expect(validateObject13PlayerProfileDataV1({ inventory: { items: [1, 2] } }).ok).toBe(false);
+  });
+
+  it('6. rejects an unknown item id', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: { shotgun: 1 } } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unknown_item_id');
+  });
+
+  it('rejects a non-integer bulb quantity', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: { bulb: 1.5 } } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('invalid_quantity');
+  });
+
+  it('3. rejects a negative bulb quantity', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: { bulb: -1 } } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('quantity_out_of_range');
+  });
+
+  it('4. rejects a bulb quantity above the registry maximum', () => {
+    const over = OBJECT13_INVENTORY_ITEM_REGISTRY.bulb.maxQuantity + 1;
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: { bulb: over } } });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('quantity_out_of_range');
+  });
+
+  it('accepts a bulb quantity right at the registry maximum', () => {
+    const result = validateObject13PlayerProfileDataV1({ inventory: { items: { bulb: OBJECT13_INVENTORY_ITEM_REGISTRY.bulb.maxQuantity } } });
+    expect(result.ok).toBe(true);
+  });
+
+  it('a top-level __proto__ key is rejected as an unknown top-level key, never reaches a dangerous-key path', () => {
     const raw = JSON.parse('{"__proto__": {"polluted": true}}') as Record<string, unknown>;
-    const result = validateObject13PlayerProfileData(raw);
+    const result = validateObject13PlayerProfileDataV1(raw);
     expect(result.ok).toBe(false);
-    if (!result.ok && result.error.code === 'dangerous_key') expect(result.error.key).toBe('__proto__');
+    if (!result.ok) expect(result.error.code).toBe('unknown_top_level_key');
   });
 
-  it('rejects a nested constructor key', () => {
-    const result = validateObject13PlayerProfileData({ a: { b: { constructor: 'x' } } });
-    expect(result.ok).toBe(false);
-    if (!result.ok && result.error.code === 'dangerous_key') expect(result.error.key).toBe('constructor');
-  });
-
-  it('rejects a dangerous key inside an array element', () => {
-    const result = validateObject13PlayerProfileData({ list: [{ prototype: 'x' }] });
-    expect(result.ok).toBe(false);
-    if (!result.ok && result.error.code === 'dangerous_key') expect(result.error.key).toBe('prototype');
-  });
-
-  it('allows a key that merely contains "proto" as a substring (not an exact dangerous key)', () => {
-    const result = validateObject13PlayerProfileData({ myProtoField: 1 });
-    expect(result.ok).toBe(true);
-  });
-
-  it('accepts data right at the size limit', () => {
-    // Account for the {"padding":""} wrapper (14 bytes) so the total is
-    // exactly at the boundary, not over it.
-    const overhead = JSON.stringify({ padding: '' }).length;
-    const padding = 'x'.repeat(OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES - overhead);
-    const result = validateObject13PlayerProfileData({ padding });
-    expect(result.ok).toBe(true);
-  });
-
-  it('rejects data one byte over the size limit', () => {
-    const overhead = JSON.stringify({ padding: '' }).length;
-    const padding = 'x'.repeat(OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES - overhead + 1);
-    const result = validateObject13PlayerProfileData({ padding });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('too_large');
+  it('stays well under the size limit for any realistic inventory', () => {
+    expect(JSON.stringify(VALID_V1_DATA).length).toBeLessThan(OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES);
   });
 });

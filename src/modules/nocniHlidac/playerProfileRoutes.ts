@@ -5,7 +5,7 @@ import { isSupportedObject13PlayerProfileVersion } from './playerProfileTypes.js
 import {
   Object13PlayerProfileGetQuerySchema,
   parseObject13PlayerProfileSyncEnvelope,
-  validateObject13PlayerProfileData,
+  validateObject13PlayerProfileDataV1,
 } from './playerProfileValidation.js';
 import { getOrCreateObject13PlayerProfile, updateObject13PlayerProfile } from './playerProfileService.js';
 
@@ -45,11 +45,17 @@ export async function nocniHlidacPlayerProfileRoutes(app: FastifyInstance): Prom
         return sendError(reply, 400, 'unsupported_profile_version');
       }
 
-      // Strict validation on purpose — no lenient silent fallback like
+      // Strict, fully-whitelisted V1 shape validation on purpose — no
+      // lenient silent fallback like
       // hardcoreProfileValidation.ts#sanitizeIncomingHardcoreSnapshot. A bad
       // profileData shape is a real 400/413, never a quietly-substituted
-      // default (see playerProfileValidation.ts).
-      const validated = validateObject13PlayerProfileData(rawProfileData);
+      // default (see playerProfileValidation.ts). This generic PUT is meant
+      // for technical/dev use only — ordinary bulb inventory changes go
+      // through the dedicated /inventory/bulb/add|consume endpoints (see
+      // playerProfileInventoryRoutes.ts), which use optimistic locking
+      // purpose-built for a single item change, not a whole-profile
+      // overwrite race.
+      const validated = validateObject13PlayerProfileDataV1(rawProfileData);
       if (!validated.ok) {
         if (validated.error.code === 'too_large') {
           return sendError(reply, 413, 'profile_data_too_large');

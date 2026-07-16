@@ -7,6 +7,7 @@ import {
   OBJECT13_PLAYER_PROFILE_VERSION,
   toObject13PlayerProfileDto,
 } from './playerProfileTypes.js';
+import { validateObject13PlayerProfileDataV1 } from './playerProfileValidation.js';
 
 /**
  * GET /nocni-hlidac/player-profile — find-or-create a default profile, touch
@@ -14,19 +15,46 @@ import {
  * hardcoreProfileService.ts#getOrCreateHardcoreProfile, but for the general,
  * mode-agnostic Object13PlayerProfile — a completely separate table, no
  * shared code path with the Hardcore profile or the leaderboard.
+ *
+ * Also normalizes a legacy/invalid stored profileData (a pre-1B empty `{}`
+ * row, or any row that no longer strictly validates as V1) to the current
+ * default V1 shape AND PERSISTS that fix — but only when the stored value
+ * actually fails validation, so revision never churns on a GET of an
+ * already-valid profile (see task spec "revision zvyš pouze tehdy, pokud se
+ * profil skutečně mění"). Uses the same optimistic-locked `updateMany` as
+ * updateObject13PlayerProfile below; losing a race here just means another
+ * caller already normalized (or moved past) this row, so the loss is
+ * harmless and the row is simply re-read.
  */
 export async function getOrCreateObject13PlayerProfile(discordUserId: string): Promise<Object13PlayerProfileDto> {
   const now = new Date();
-  const row = await db.object13PlayerProfile.upsert({
+  let row = await db.object13PlayerProfile.upsert({
     where: { discordUserId },
     update: { lastSeenAt: now },
     create: {
       discordUserId,
       profileVersion: OBJECT13_PLAYER_PROFILE_VERSION,
-      profileData: createDefaultObject13PlayerProfileData() as Prisma.InputJsonValue,
+      profileData: createDefaultObject13PlayerProfileData() as unknown as Prisma.InputJsonValue,
       lastSeenAt: now,
     },
   });
+
+  if (row.profileVersion === OBJECT13_PLAYER_PROFILE_VERSION && !validateObject13PlayerProfileDataV1(row.profileData).ok) {
+    const normalized = await db.object13PlayerProfile.updateMany({
+      where: { discordUserId, revision: row.revision },
+      data: {
+        profileData: createDefaultObject13PlayerProfileData() as unknown as Prisma.InputJsonValue,
+        revision: { increment: 1 },
+        lastSeenAt: now,
+      },
+    });
+    // Whether this call won the race (count === 1) or lost it to a
+    // concurrent normalizer (count === 0), the row must be re-read either
+    // way — this call's `row` is stale either as the pre-normalization value
+    // or as the value at the moment just before the winner committed.
+    row = await db.object13PlayerProfile.findUniqueOrThrow({ where: { discordUserId } });
+  }
+
   return toObject13PlayerProfileDto(row);
 }
 
@@ -75,7 +103,7 @@ export async function updateObject13PlayerProfile(
     where: { discordUserId, revision: expectedRevision },
     data: {
       profileVersion,
-      profileData: profileData as Prisma.InputJsonValue,
+      profileData: profileData as unknown as Prisma.InputJsonValue,
       revision: { increment: 1 },
       lastSeenAt: now,
     },

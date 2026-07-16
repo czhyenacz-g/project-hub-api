@@ -268,21 +268,45 @@ hub vrací**, takže tenhle nesoulad je vyřešený. `hardcoreDeathsByNight` (vi
 pole PŘIDANÉ do obou stran zároveň (stejný úkol "Uzavřít Hardcore profil a achievementy"),
 ne recidiva stejného problému.
 
-## Obecný hráčský profil Objektu 13 (`Object13PlayerProfile`) — krok 1A
+## Obecný hráčský profil Objektu 13 (`Object13PlayerProfile`) — krok 1A + 1B (V1 kontrakt + inventář)
 
 Třetí, NEZÁVISLÁ tabulka od `NocniHlidacPlayer` (leaderboard identita + `bestRun`/
 `currentRun`) i od `Object13HardcorePlayerProfile` (Hardcore-only odměna/statistiky výše) —
-obecný, **mode-agnostic** profil hráče, základ pro budoucí inventář/nastavení/dlouhodobý
-postup/vybavení kanceláře. Žádné sdílené sloupce, žádný `@relation`/cizí klíč na žádnou z
-ostatních dvou tabulek — propojeno jen shodnou hodnotou `discordUserId`, stejná konvence
-jako `Object13HardcorePlayerProfile` vůči `NocniHlidacPlayer`. Vlastní router
-(`src/modules/nocniHlidac/playerProfileRoutes.ts`), service
-(`playerProfileService.ts`), validace (`playerProfileValidation.ts`) a typy/DTO
-(`playerProfileTypes.ts`) — nulové sdílení kódu s `service.ts`/`hardcoreProfileService.ts`.
+obecný, **mode-agnostic** profil hráče. Žádné sdílené sloupce, žádný `@relation`/cizí klíč na
+žádnou z ostatních dvou tabulek — propojeno jen shodnou hodnotou `discordUserId`, stejná
+konvence jako `Object13HardcorePlayerProfile` vůči `NocniHlidacPlayer`. Vlastní router
+(`playerProfileRoutes.ts` + `playerProfileInventoryRoutes.ts`), service
+(`playerProfileService.ts` + `playerProfileInventoryService.ts`), validace
+(`playerProfileValidation.ts`), typy/DTO (`playerProfileTypes.ts`) a inventářový
+model/registr (`playerProfileInventory.ts`) — nulové sdílení kódu s
+`service.ts`/`hardcoreProfileService.ts`.
 
-**V tomhle kroku profil NEOBSAHUJE žádná skutečná herní data.** `profileData` je záměrně
-prázdný JSON objekt (`{}`) — žárovky, zbraně, nastavení, vybavení kanceláře, postup se
-přesunou až v samostatném kroku 1B (nebo pozdější části 2), viz report k zadání.
+**Krok 1B dává `profileData` první skutečný, přesně validovaný obsah — `profileVersion: 1`
+kontrakt (`Object13PlayerProfileDataV1`, viz `playerProfileInventory.ts`):**
+
+```ts
+type Object13InventoryItemId = 'bulb'; // budoucí položky = nový klíč v OBJECT13_INVENTORY_ITEM_REGISTRY
+type Object13InventoryItems = Partial<Record<Object13InventoryItemId, number>>;
+type Object13PlayerProfileDataV1 = { inventory: { items: Object13InventoryItems } };
+```
+
+Jediná dnes podporovaná položka je `bulb` (náhradní žárovky) — žádné zbraně, munice,
+baterie ani vybavení kanceláře zatím. Registr (`OBJECT13_INVENTORY_ITEM_REGISTRY`) je
+JEDINÝ zdroj pro `defaultQuantity`/`minQuantity`/`maxQuantity` každé položky:
+
+```ts
+bulb: { id: 'bulb', defaultQuantity: 10, minQuantity: 0, maxQuantity: 999 }
+```
+
+`defaultQuantity: 10` musí odpovídat `nocni-hlidac`'s `game/core/bulbsConfig.ts#BULBS_CONFIG.startingCount`
+— žádný automatický cross-repo import (jiný repozitář, jiný build), hodnota je záměrně
+duplikovaná na obou stranách; při změně výchozího počtu žárovek ve hře je potřeba změnit i
+tuhle konstantu ručně. `maxQuantity: 999` je čistě technický bezpečnostní strop (ochrana
+proti poškozené/nesmyslné hodnotě), NE herní limit — hra sama žádný strop na inventář nemá.
+
+Nový profil nikdy nezačíná na `{}` — `createDefaultObject13PlayerProfileDataV1()` vrací
+`{ inventory: { items: { bulb: 10 } } }`. Změna `defaultQuantity` v registru ovlivní jen
+NOVĚ VYTVOŘENÉ profily, nikdy existující řádky (žádné hromadné přepsání).
 
 ```
 GET /nocni-hlidac/player-profile   — najde/založí profil, vrátí ho
@@ -296,16 +320,26 @@ curl -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
   "https://api.example.com/nocni-hlidac/player-profile?discordUserId=123456789012345678"
 ```
 
-Najde profil podle `discordUserId`, založí default (`profileVersion: 1`, `profileData: {}`,
-`revision: 1`), pokud ještě neexistuje, jinak aktualizuje jen `lastSeenAt` (idempotentní —
-opakované volání nikdy nevytvoří druhý řádek ani nezmění `revision`/`profileData`).
+Najde profil podle `discordUserId`, založí default (`profileVersion: 1`,
+`profileData: {inventory: {items: {bulb: 10}}}`, `revision: 1`), pokud ještě neexistuje,
+jinak aktualizuje jen `lastSeenAt` (idempotentní — opakované volání nikdy nevytvoří druhý
+řádek).
+
+**Normalizace starého/neplatného profilu na GET**: pokud uložené `profileData` u
+`profileVersion: 1` řádku NEPROJDE přísnou V1 validací (typicky starý `{}` řádek z doby
+před krokem 1B, nebo ručně/jinak poškozený řádek), GET ho v tichosti přepíše na
+`createDefaultObject13PlayerProfileDataV1()` a **tuhle opravu i persistuje** — `revision` se
+zvýší přesně o 1, protože jde o skutečnou změnu. Opakované GET už validního profilu
+`revision` znovu nezvyšuje (žádné churnování při každém čtení). Používá stejný atomicky
+podmíněný `updateMany` jako zápis níže; prohraná souběžná normalizace jen znovu přečte
+řádek, nikdy nepřepíše vítěze podruhé.
 
 Odpověď (200):
 ```json
 {
   "discordUserId": "123456789012345678",
   "profileVersion": 1,
-  "profileData": {},
+  "profileData": { "inventory": { "items": { "bulb": 10 } } },
   "revision": 1,
   "createdAt": "2026-07-16T12:00:00.000Z",
   "updatedAt": "2026-07-16T12:00:00.000Z",
@@ -330,23 +364,38 @@ nemohla nic existujícího rozbít.
 curl -X PUT https://api.example.com/nocni-hlidac/player-profile \
   -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"discordUserId":"123456789012345678","expectedRevision":1,"profileVersion":1,"profileData":{}}'
+  -d '{"discordUserId":"123456789012345678","expectedRevision":1,"profileVersion":1,"profileData":{"inventory":{"items":{"bulb":10}}}}'
 ```
+
+**Tenhle obecný PUT je určený jen pro technické/dev účely** (např. `nocni-hlidac`'s
+dev-only "TEST PROFILE WRITE" v `DebugPanel.tsx`, které profil jen znovu uloží beze
+změny). Běžná herní logika (získání/spotřeba náhradní žárovky) NIKDY nejde přes tenhle
+endpoint — používá doménové operace `/inventory/bulb/add`/`/inventory/bulb/consume` níže,
+které mají vlastní optimistic locking purpose-built pro jednu položkovou změnu, ne
+whole-profile přepis.
 
 Vyžaduje `discordUserId` (stejný přísnější snowflake formát jako GET), `expectedRevision`
 (kladné celé číslo), `profileVersion` (kladné celé číslo, musí být v
 `OBJECT13_PLAYER_PROFILE_SUPPORTED_VERSIONS`, dnes jen `[1]`) a `profileData`.
 
-**Validace `profileData` je záměrně PŘÍSNÁ, ne lenientní jako Hardcore sync výše** — žádný
-tichý fallback na bezpečný default. Musí to být plain JSON objekt (`null`/pole/string/
-číslo/boolean se odmítne, 400 `invalid_profile_data`), nesmí obsahovat klíč `__proto__`,
-`constructor` ani `prototype` NIKDE v hloubce (rekurzivní kontrola, 400
-`invalid_profile_data` — `__proto__` navíc blokuje už samotný výchozí Fastify JSON
-body parser dřív, než request vůbec dorazí do routy), a serializovaná velikost (`JSON.stringify`,
-UTF-8 bajty) nesmí přesáhnout `OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` (32 KB, pojmenovaná
-konstanta v `playerProfileTypes.ts`) — jinak 413 `profile_data_too_large`. Neznámá top-level
-pole v těle requestu (cokoliv mimo `discordUserId`/`expectedRevision`/`profileVersion`/
-`profileData`) se nikdy neuloží (zod `.safeParse` je tiše odstraní z parsovaného výsledku).
+**Validace `profileData` je přísná, plně whitelistovaná podle přesného V1 tvaru** — žádný
+tichý fallback na bezpečný default (`validateObject13PlayerProfileDataV1`,
+`playerProfileValidation.ts`). Musí to být plain JSON objekt s JEDINÝM top-level klíčem
+`inventory` (cokoliv jiného → 400 `invalid_profile_data`, kód `unknown_top_level_key`);
+`inventory` musí mít jediný klíč `items`; `items` je objekt, jehož klíče musí být ID ze
+`OBJECT13_INVENTORY_ITEM_REGISTRY` (dnes jen `"bulb"`, jinak `unknown_item_id`) a hodnoty
+celá čísla uvnitř `[minQuantity, maxQuantity]` z registru (jinak `invalid_quantity`/
+`quantity_out_of_range`). Protože je tenhle validátor plně whitelistovaný (jen tři pevné
+literály + konečná množina item ID), `__proto__`/`constructor`/`prototype` na jakékoliv
+úrovni skončí jako "neznámý klíč" dřív, než by šlo o cokoliv nebezpečného — žádná
+samostatná rekurzivní dangerous-key kontrola už není potřeba (`__proto__` navíc blokuje
+už samotný výchozí Fastify JSON body parser dřív, než request vůbec dorazí do routy).
+Serializovaná velikost (`JSON.stringify`, UTF-8 bajty) se pořád kontroluje proti
+`OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` (32 KB, `playerProfileInventory.ts`) jako
+defense-in-depth pro budoucí větší registr — dnešní jediná položka `bulb` ho reálně nemůže
+přiblížit. Neznámá top-level pole v těle requestu (cokoliv mimo `discordUserId`/
+`expectedRevision`/`profileVersion`/`profileData`) se nikdy neuloží (zod `.safeParse` je
+tiše odstraní z parsovaného výsledku).
 
 **Optimistic locking (`revision`)**: zápis NIKDY neprovádí `findUnique` a pak nechráněný
 `update` (to by byla lost-update race — dva souběžní volající by mohli oba přečíst stejnou
@@ -365,7 +414,7 @@ Odpověď (409) při konfliktu revision:
 {
   "error": "revision_conflict",
   "currentRevision": 4,
-  "profile": { "discordUserId": "...", "profileVersion": 1, "profileData": {}, "revision": 4, "...": "..." }
+  "profile": { "discordUserId": "...", "profileVersion": 1, "profileData": {"inventory":{"items":{"bulb":10}}}, "revision": 4, "...": "..." }
 }
 ```
 
@@ -380,17 +429,62 @@ Odpověď (409) při konfliktu revision:
 | 413 | Serializované `profileData` přesahuje `OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` | `{"error":"profile_data_too_large"}` |
 | 500 | Neočekávaná chyba | `{"error":"internal_error"}` |
 
+### POST /nocni-hlidac/player-profile/inventory/bulb/add|consume
+
+Doménové operace pro jednu položku inventáře — jediný způsob, jak ordinary herní logika
+(získání/spotřeba náhradní žárovky) smí měnit `profileData`. Jedna dvojice `/add`/`/consume`
+routa PER registrovaná položka (`OBJECT13_INVENTORY_ITEM_IDS` smyčka v
+`playerProfileInventoryRoutes.ts`) — přidání další položky do registru automaticky
+zaregistruje i její routy, žádné nové route-wiring.
+
+```bash
+curl -X POST https://api.example.com/nocni-hlidac/player-profile/inventory/bulb/add \
+  -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"discordUserId":"123456789012345678","amount":1,"expectedRevision":3}'
+
+curl -X POST https://api.example.com/nocni-hlidac/player-profile/inventory/bulb/consume \
+  -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"discordUserId":"123456789012345678","amount":1,"expectedRevision":3}'
+```
+
+`discordUserId` přijímá server stejně jako u obecného PUT — ze server-to-server vrstvy
+(`nocni-hlidac`'s vlastní Next.js proxy dosadí hodnotu ze session, browser ji nikdy
+nezadává přímo). `amount` musí být kladné celé číslo, `expectedRevision` kladné celé číslo.
+
+Stejný optimistic-locking princip jako obecný PUT (atomický `updateMany` podmíněný na
+`discordUserId AND revision = expectedRevision`) — úspěch zvýší `revision` přesně o 1, dva
+souběžné požadavky se stejnou `expectedRevision` nemohou oba uspět. Čistá aritmetika
+(nová hodnota položky) žije mimo route handler v `playerProfileInventory.ts`
+(`addInventoryItem`/`consumeInventoryItem`/`getInventoryItemQuantity`), DB
+zápis/optimistic-locking v `playerProfileInventoryService.ts`.
+
+| Stav | Kdy | Tvar |
+|---|---|---|
+| 200 | Úspěch | stejný tvar jako GET/PUT, `revision` zvýšené o 1 |
+| 400 | Neplatné tělo (`amount`/`expectedRevision` chybí, není kladné celé číslo, neplatný `discordUserId`) | `{"error":"invalid_request"}` |
+| 404 | Profil pro `discordUserId` neexistuje (nikdy neprošel GET) | `{"error":"profile_not_found"}` |
+| 409 | `expectedRevision` neodpovídá aktuální hodnotě v DB | `{"error":"revision_conflict","currentRevision":N,"profile":{...}}` |
+| 409 | `add`: výsledná hodnota by přesáhla `maxQuantity` z registru | `{"error":"exceeds_maximum"}` |
+| 409 | `consume`: výsledná hodnota by šla pod `minQuantity` (0) | `{"error":"insufficient_inventory"}` |
+| 500 | Neočekávaná chyba | `{"error":"internal_error"}` |
+
 ### DB model
 
 `Object13PlayerProfile` (`prisma/schema.prisma`), migrace
-`prisma/migrations/20260716115859_add_object13_player_profile/`:
+`prisma/migrations/20260716115859_add_object13_player_profile/` (vznik tabulky, krok 1A) a
+`prisma/migrations/20260716134119_object13_player_profile_v1_default/` (sloupcový default
+`profileData` změněn z `{}` na validní V1 tvar, krok 1B — jen `ALTER COLUMN ... SET DEFAULT`,
+nemigruje žádná existující data, protože v době změny tabulka žádná produkční data
+neobsahovala):
 
 ```prisma
 model Object13PlayerProfile {
   id             String   @id @default(cuid())
   discordUserId  String   @unique
   profileVersion Int      @default(1)
-  profileData    Json     @default("{}")
+  profileData    Json     @default("{\"inventory\":{\"items\":{\"bulb\":10}}}")
   revision       Int      @default(1)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -401,35 +495,47 @@ model Object13PlayerProfile {
 }
 ```
 
-Migrace jen `CREATE TABLE` + 3 indexy (unique `discordUserId`, lookup `discordUserId`,
-`updatedAt` desc) — nemění žádnou existující tabulku, nemigruje žádná Hardcore/leaderboard
-data, nevytváří žádné testovací/seedovací řádky.
+Krok 1A migrace: jen `CREATE TABLE` + 3 indexy. Krok 1B migrace: jen `ALTER COLUMN`
+sloupcového defaultu — ani jedna nemění existující Hardcore/leaderboard tabulku, nemigruje
+historická data (v době změny žádná produkční data v tabulce nebyla), nevytváří testovací
+řádky.
 
 **Produkční nasazení (postup, zatím NEPROVEDENO):**
 1. Vytvořit zálohu databáze (viz `docs/operations/backups.md`).
 2. Ověřit stav Prisma migrací na produkci (`docker compose exec project-hub-api npx prisma migrate status`).
 3. Spustit `docker compose exec project-hub-api npx prisma migrate deploy`.
-4. Ověřit, že tabulka `Object13PlayerProfile` v produkční DB skutečně vznikla.
-5. Nasadit novou verzi API (obsahuje nové routy).
-6. Smoke test: `GET /nocni-hlidac/player-profile?discordUserId=<reálné testovací ID>` a ověřit
-   odpověď 200 s `profileVersion: 1`, `profileData: {}`, `revision: 1`.
+4. Nasadit novou verzi API (obsahuje nové inventářové routy a přísnější V1 validaci).
+5. Smoke test: `GET /nocni-hlidac/player-profile?discordUserId=<reálné testovací ID>` a ověřit
+   odpověď 200 s `profileVersion: 1`, `profileData: {"inventory":{"items":{"bulb":10}}}`,
+   `revision: 1` (nebo `2`, pokud šlo o starší `{}` řádek, který GET normalizoval).
+6. Smoke test add/consume: `POST /inventory/bulb/add` a `/inventory/bulb/consume` s
+   testovacím účtem, ověřit `revision` +1 a správnou hodnotu `bulb`, pak testovací profil
+   smazat.
 
 ### Testy
 
-`src/modules/nocniHlidac/playerProfileValidation.test.ts` — čistá logika (discordUserId
-regex, envelope schema, rekurzivní detekce nebezpečných klíčů, limit velikosti), bez DB.
+`src/modules/nocniHlidac/playerProfileInventory.test.ts` — čistá logika registru a
+inventářových operací (`addInventoryItem`/`consumeInventoryItem`/
+`getInventoryItemQuantity`/`normalizeInventoryQuantity`), bez DB.
+`src/modules/nocniHlidac/playerProfileValidation.test.ts` — envelope schema, V1 shape
+validace (`validateObject13PlayerProfileDataV1`), inventory operation body schema, bez DB.
 `src/modules/nocniHlidac/playerProfileRoutes.test.ts` — plné route testy přes Fastify
-`.inject()` proti lokální dev Postgres, včetně souběžnostního testu (dva paralelní PUT se
-stejnou `expectedRevision` — přesně jeden uspěje). Testovací `discordUserId` používají
-rezervovaný číselný blok `90000000000000xxx` (18 číslic, vždy projde
-`DiscordSnowflakeIdSchema`, nikdy nekoliduje se skutečným Discord ID ani s `seed-` lore
-hráči), čistí se po sobě v `afterEach`.
+`.inject()` proti lokální dev Postgres (GET/PUT, normalizace starého `{}` profilu,
+souběžnostní test). `src/modules/nocniHlidac/playerProfileInventoryRoutes.test.ts` — plné
+route testy pro `/inventory/bulb/add|consume` (úspěch, `exceeds_maximum`,
+`insufficient_inventory`, `revision_conflict`, souběžný `consume`). Testovací
+`discordUserId` používají rezervované číselné bloky (`90000000000000xxx` pro
+`playerProfileRoutes.test.ts`, `90000000000001xxx` pro
+`playerProfileInventoryRoutes.test.ts` — oddělené bloky, ať souběžný test-run obou souborů
+nekoliduje), čistí se po sobě v `afterEach`.
 
 ## Plánovaný další krok
 
-- Krok 1B (nebo část 2): přesun žárovek (`bulbsRemaining`/`roomBulbs`) do
-  `Object13PlayerProfile.profileData` — teprve TEĎ, po ověření obecného profilu/API/migrace/
-  revision v produkci.
+- Přesun `nocni-hlidac`'s `bulbsRemaining`/localStorage na VPS jako autoritativní zdroj pro
+  přihlášeného hráče (klientská strana kroku 1B) — serverová strana (tenhle dokument) je
+  hotová, čeká se na napojení klienta.
+- Rozšíření inventáře o další položky (zbraně, munice, baterie, vybavení kanceláře) — nový
+  klíč v `OBJECT13_INVENTORY_ITEM_REGISTRY`, žádná změna kontraktu ani schématu.
 - Death reason posílaný a ukládaný na `player/death`.
 - Samostatná `guard_runs`/incident log tabulka (historie jednotlivých směn, ne jen
   agregovaný `bestRun`/`currentRun`).
