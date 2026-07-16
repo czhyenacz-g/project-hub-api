@@ -268,8 +268,168 @@ hub vrací**, takže tenhle nesoulad je vyřešený. `hardcoreDeathsByNight` (vi
 pole PŘIDANÉ do obou stran zároveň (stejný úkol "Uzavřít Hardcore profil a achievementy"),
 ne recidiva stejného problému.
 
+## Obecný hráčský profil Objektu 13 (`Object13PlayerProfile`) — krok 1A
+
+Třetí, NEZÁVISLÁ tabulka od `NocniHlidacPlayer` (leaderboard identita + `bestRun`/
+`currentRun`) i od `Object13HardcorePlayerProfile` (Hardcore-only odměna/statistiky výše) —
+obecný, **mode-agnostic** profil hráče, základ pro budoucí inventář/nastavení/dlouhodobý
+postup/vybavení kanceláře. Žádné sdílené sloupce, žádný `@relation`/cizí klíč na žádnou z
+ostatních dvou tabulek — propojeno jen shodnou hodnotou `discordUserId`, stejná konvence
+jako `Object13HardcorePlayerProfile` vůči `NocniHlidacPlayer`. Vlastní router
+(`src/modules/nocniHlidac/playerProfileRoutes.ts`), service
+(`playerProfileService.ts`), validace (`playerProfileValidation.ts`) a typy/DTO
+(`playerProfileTypes.ts`) — nulové sdílení kódu s `service.ts`/`hardcoreProfileService.ts`.
+
+**V tomhle kroku profil NEOBSAHUJE žádná skutečná herní data.** `profileData` je záměrně
+prázdný JSON objekt (`{}`) — žárovky, zbraně, nastavení, vybavení kanceláře, postup se
+přesunou až v samostatném kroku 1B (nebo pozdější části 2), viz report k zadání.
+
+```
+GET /nocni-hlidac/player-profile   — najde/založí profil, vrátí ho
+PUT /nocni-hlidac/player-profile   — optimistic-locked zápis (viz revision níže)
+```
+
+### GET /nocni-hlidac/player-profile?discordUserId=...
+
+```bash
+curl -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
+  "https://api.example.com/nocni-hlidac/player-profile?discordUserId=123456789012345678"
+```
+
+Najde profil podle `discordUserId`, založí default (`profileVersion: 1`, `profileData: {}`,
+`revision: 1`), pokud ještě neexistuje, jinak aktualizuje jen `lastSeenAt` (idempotentní —
+opakované volání nikdy nevytvoří druhý řádek ani nezmění `revision`/`profileData`).
+
+Odpověď (200):
+```json
+{
+  "discordUserId": "123456789012345678",
+  "profileVersion": 1,
+  "profileData": {},
+  "revision": 1,
+  "createdAt": "2026-07-16T12:00:00.000Z",
+  "updatedAt": "2026-07-16T12:00:00.000Z",
+  "lastSeenAt": "2026-07-16T12:00:00.000Z"
+}
+```
+
+Interní `id` (cuid primární klíč) se nikdy nevrací — klient adresuje svůj profil výhradně
+přes `discordUserId`.
+
+**`discordUserId` validace je přísnější než u ostatních `/nocni-hlidac/*` endpointů** —
+nový `DiscordSnowflakeIdSchema` (`playerProfileValidation.ts`) vyžaduje `^\d{17,20}$`
+(jen číslice, 17-20 znaků, odpovídá skutečnému tvaru Discord snowflake ID). Starší
+`NocniHlidacDiscordUserIdSchema`/`HardcoreProfileGetQuerySchema` (`z.string().min(1)`)
+zůstávají BEZE ZMĚNY na `player/upsert`, `player/survive-night`, `player/death` i
+`hardcore-profile` — nová přísnější kontrola se zatím týká jen tohoto nového endpointu, ať
+nemohla nic existujícího rozbít.
+
+### PUT /nocni-hlidac/player-profile
+
+```bash
+curl -X PUT https://api.example.com/nocni-hlidac/player-profile \
+  -H "Authorization: Bearer $NOCNI_HLIDAC_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"discordUserId":"123456789012345678","expectedRevision":1,"profileVersion":1,"profileData":{}}'
+```
+
+Vyžaduje `discordUserId` (stejný přísnější snowflake formát jako GET), `expectedRevision`
+(kladné celé číslo), `profileVersion` (kladné celé číslo, musí být v
+`OBJECT13_PLAYER_PROFILE_SUPPORTED_VERSIONS`, dnes jen `[1]`) a `profileData`.
+
+**Validace `profileData` je záměrně PŘÍSNÁ, ne lenientní jako Hardcore sync výše** — žádný
+tichý fallback na bezpečný default. Musí to být plain JSON objekt (`null`/pole/string/
+číslo/boolean se odmítne, 400 `invalid_profile_data`), nesmí obsahovat klíč `__proto__`,
+`constructor` ani `prototype` NIKDE v hloubce (rekurzivní kontrola, 400
+`invalid_profile_data` — `__proto__` navíc blokuje už samotný výchozí Fastify JSON
+body parser dřív, než request vůbec dorazí do routy), a serializovaná velikost (`JSON.stringify`,
+UTF-8 bajty) nesmí přesáhnout `OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` (32 KB, pojmenovaná
+konstanta v `playerProfileTypes.ts`) — jinak 413 `profile_data_too_large`. Neznámá top-level
+pole v těle requestu (cokoliv mimo `discordUserId`/`expectedRevision`/`profileVersion`/
+`profileData`) se nikdy neuloží (zod `.safeParse` je tiše odstraní z parsovaného výsledku).
+
+**Optimistic locking (`revision`)**: zápis NIKDY neprovádí `findUnique` a pak nechráněný
+`update` (to by byla lost-update race — dva souběžní volající by mohli oba přečíst stejnou
+"aktuální" hodnotu, druhý zápis by první tiše přepsal beze stopy). Místo toho jeden atomický
+`updateMany` s podmínkou `WHERE discordUserId = ... AND revision = expectedRevision` — Postgres
+řadí souběžné `UPDATE` příkazy nad stejným řádkem přes vlastní row lock, takže ze dvou
+opravdu současných volání se stejným `expectedRevision` může uspět nejvýš jedno. Prohraný
+zápis (`updateMany` vrátí `{count: 0}`) NEPŘEPÍŠE nic — teprve POTOM se řádek znovu přečte,
+čistě aby se rozhodlo, jestli profil vůbec neexistuje (404 `profile_not_found`), nebo šlo o
+konflikt revision (409). Tohle druhé čtení se nikdy nevrací zpátky do rozhodnutí o zápisu.
+
+Odpověď (200) při úspěchu: stejný tvar jako GET, `revision` zvýšené přesně o 1.
+
+Odpověď (409) při konfliktu revision:
+```json
+{
+  "error": "revision_conflict",
+  "currentRevision": 4,
+  "profile": { "discordUserId": "...", "profileVersion": 1, "profileData": {}, "revision": 4, "...": "..." }
+}
+```
+
+### Chybové odpovědi (`/nocni-hlidac/player-profile`)
+
+| Stav | Kdy | Tvar |
+|---|---|---|
+| 400 | Neplatné tělo/query (zod), neplatné `profileData` (`invalid_profile_data`), nepodporovaná `profileVersion` (`unsupported_profile_version`) | `{"error":"invalid_request"}` / `{"error":"invalid_profile_data"}` / `{"error":"unsupported_profile_version"}` |
+| 401 | Chybějící/špatný token | `{"error":"unauthorized"}` |
+| 404 | PUT proti `discordUserId`, který nikdy neprošel GET (profil neexistuje) | `{"error":"profile_not_found"}` |
+| 409 | `expectedRevision` neodpovídá aktuální hodnotě v DB | `{"error":"revision_conflict","currentRevision":N,"profile":{...}}` |
+| 413 | Serializované `profileData` přesahuje `OBJECT13_PLAYER_PROFILE_DATA_MAX_BYTES` | `{"error":"profile_data_too_large"}` |
+| 500 | Neočekávaná chyba | `{"error":"internal_error"}` |
+
+### DB model
+
+`Object13PlayerProfile` (`prisma/schema.prisma`), migrace
+`prisma/migrations/20260716115859_add_object13_player_profile/`:
+
+```prisma
+model Object13PlayerProfile {
+  id             String   @id @default(cuid())
+  discordUserId  String   @unique
+  profileVersion Int      @default(1)
+  profileData    Json     @default("{}")
+  revision       Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  lastSeenAt     DateTime @default(now())
+
+  @@index([discordUserId])
+  @@index([updatedAt(sort: Desc)])
+}
+```
+
+Migrace jen `CREATE TABLE` + 3 indexy (unique `discordUserId`, lookup `discordUserId`,
+`updatedAt` desc) — nemění žádnou existující tabulku, nemigruje žádná Hardcore/leaderboard
+data, nevytváří žádné testovací/seedovací řádky.
+
+**Produkční nasazení (postup, zatím NEPROVEDENO):**
+1. Vytvořit zálohu databáze (viz `docs/operations/backups.md`).
+2. Ověřit stav Prisma migrací na produkci (`docker compose exec project-hub-api npx prisma migrate status`).
+3. Spustit `docker compose exec project-hub-api npx prisma migrate deploy`.
+4. Ověřit, že tabulka `Object13PlayerProfile` v produkční DB skutečně vznikla.
+5. Nasadit novou verzi API (obsahuje nové routy).
+6. Smoke test: `GET /nocni-hlidac/player-profile?discordUserId=<reálné testovací ID>` a ověřit
+   odpověď 200 s `profileVersion: 1`, `profileData: {}`, `revision: 1`.
+
+### Testy
+
+`src/modules/nocniHlidac/playerProfileValidation.test.ts` — čistá logika (discordUserId
+regex, envelope schema, rekurzivní detekce nebezpečných klíčů, limit velikosti), bez DB.
+`src/modules/nocniHlidac/playerProfileRoutes.test.ts` — plné route testy přes Fastify
+`.inject()` proti lokální dev Postgres, včetně souběžnostního testu (dva paralelní PUT se
+stejnou `expectedRevision` — přesně jeden uspěje). Testovací `discordUserId` používají
+rezervovaný číselný blok `90000000000000xxx` (18 číslic, vždy projde
+`DiscordSnowflakeIdSchema`, nikdy nekoliduje se skutečným Discord ID ani s `seed-` lore
+hráči), čistí se po sobě v `afterEach`.
+
 ## Plánovaný další krok
 
+- Krok 1B (nebo část 2): přesun žárovek (`bulbsRemaining`/`roomBulbs`) do
+  `Object13PlayerProfile.profileData` — teprve TEĎ, po ověření obecného profilu/API/migrace/
+  revision v produkci.
 - Death reason posílaný a ukládaný na `player/death`.
 - Samostatná `guard_runs`/incident log tabulka (historie jednotlivých směn, ne jen
   agregovaný `bestRun`/`currentRun`).

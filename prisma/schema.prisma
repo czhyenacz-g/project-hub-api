@@ -170,3 +170,33 @@ model Object13HardcorePlayerProfile {
   @@index([discordUserId])
   @@index([hardcoreBestNight(sort: Desc)])
 }
+
+// Noční hlídač / Objekt 13 — obecný, mode-agnostic hráčský profil (step 1A of
+// the profile/inventory work). Deliberately SEPARATE from both
+// NocniHlidacPlayer (leaderboard identity + bestRun/currentRun) and
+// Object13HardcorePlayerProfile (Hardcore-only reward/stats) — this model is
+// NOT part of the leaderboard and carries no Hardcore-specific fields.
+// Connected to the other two only by the same discordUserId string
+// convention (no @relation/foreign key on purpose, see report — introducing
+// one now would be a bigger identity refactor out of scope for this step).
+//
+// `profileData` is an intentionally empty, opaque JSON bucket for now — no
+// real game data (bulbs, weapons, settings, inventory) moves here yet, see
+// src/modules/nocniHlidac/playerProfileTypes.ts#createDefaultObject13PlayerProfileData.
+// `revision` exists from day one for optimistic locking on PUT (see
+// playerProfileService.ts#updateObject13PlayerProfile) — callers must supply
+// the revision they last read; a stale value is rejected (409), never
+// silently overwritten.
+model Object13PlayerProfile {
+  id             String   @id @default(cuid())
+  discordUserId  String   @unique
+  profileVersion Int      @default(1)
+  profileData    Json     @default("{}")
+  revision       Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  lastSeenAt     DateTime @default(now())
+
+  @@index([discordUserId])
+  @@index([updatedAt(sort: Desc)])
+}
