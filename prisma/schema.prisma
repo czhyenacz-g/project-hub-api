@@ -74,6 +74,8 @@ model OsmaUser {
   updatedAt   DateTime @updatedAt
   homeMatches OsmaOnlineMatch[] @relation("HomeUser")
   awayMatches OsmaOnlineMatch[] @relation("AwayUser")
+  createdTournaments     Tournament[]      @relation("TournamentCreatedBy")
+  claimedTournamentTeams TournamentTeam[]  @relation("TournamentTeamClaimedBy")
 
   @@index([discordId])
 }
@@ -123,6 +125,45 @@ model OsmaOnlineMatchEvent {
 
   @@index([onlineMatchId])
   @@index([gameCode])
+}
+
+// Osmá liga — turnaje (step 1: založení + týmy only, see
+// src/modules/osmaLiga/tournamentService.ts). No matches/scheduling/claim yet
+// — status is always "open" for now, winnerTeamId/startedAt/finishedAt are
+// placeholders for later steps.
+model Tournament {
+  id              String    @id @default(cuid())
+  publicCode      String    @unique
+  name            String
+  createdByUserId String
+  createdBy       OsmaUser  @relation("TournamentCreatedBy", fields: [createdByUserId], references: [id])
+  status          String    @default("open")
+  playerCount     Int
+  format          String
+  createdAt       DateTime  @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  winnerTeamId    String?
+  teams           TournamentTeam[]
+
+  @@index([createdByUserId])
+}
+
+model TournamentTeam {
+  id              String    @id @default(cuid())
+  tournamentId    String
+  tournament      Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  slotNumber      Int
+  name            String
+  claimedByUserId String?
+  claimedByUser   OsmaUser?  @relation("TournamentTeamClaimedBy", fields: [claimedByUserId], references: [id], onDelete: SetNull)
+  claimedAt       DateTime?
+  seed            Int?
+  finalRank       Int?
+  createdAt       DateTime  @default(now())
+
+  @@unique([tournamentId, slotNumber])
+  @@index([tournamentId])
 }
 
 // Noční hlídač (nocni-hlidac.vercel.app) — samostatný projekt, žádný vztah k

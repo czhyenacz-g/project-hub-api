@@ -5,6 +5,7 @@ import { db } from './db.js';
 import { osmaLigaRoutes } from './modules/osmaLiga/routes.js';
 import { onlineRoutes } from './modules/osmaLiga/onlineRoutes.js';
 import { trainingChallengeRoutes } from './modules/osmaLiga/trainingChallengeRoutes.js';
+import { tournamentRoutes } from './modules/osmaLiga/tournamentRoutes.js';
 import { nocniHlidacRoutes } from './modules/nocniHlidac/routes.js';
 import { nocniHlidacHardcoreProfileRoutes } from './modules/nocniHlidac/hardcoreProfileRoutes.js';
 import { nocniHlidacPlayerProfileRoutes } from './modules/nocniHlidac/playerProfileRoutes.js';
@@ -28,6 +29,7 @@ async function main(): Promise<void> {
   await app.register(osmaLigaRoutes);
   await app.register(onlineRoutes);
   await app.register(trainingChallengeRoutes);
+  await app.register(tournamentRoutes);
   await app.register(nocniHlidacRoutes);
   await app.register(nocniHlidacHardcoreProfileRoutes);
   await app.register(nocniHlidacPlayerProfileRoutes);
