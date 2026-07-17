@@ -145,6 +145,7 @@ model Tournament {
   finishedAt      DateTime?
   winnerTeamId    String?
   teams           TournamentTeam[]
+  matches         TournamentMatch[]
 
   @@index([createdByUserId])
 }
@@ -161,6 +162,8 @@ model TournamentTeam {
   seed            Int?
   finalRank       Int?
   createdAt       DateTime  @default(now())
+  homeMatches     TournamentMatch[] @relation("TournamentMatchHomeTeam")
+  awayMatches     TournamentMatch[] @relation("TournamentMatchAwayTeam")
 
   @@unique([tournamentId, slotNumber])
   // Enforces "one claimed team per user per tournament" at the DB level —
@@ -170,6 +173,39 @@ model TournamentTeam {
   // under a race (see claimTournamentTeam in tournamentService.ts).
   @@unique([tournamentId, claimedByUserId])
   @@index([tournamentId])
+}
+
+// Osmá liga — turnajový rozpis (step: start turnaje + generování zápasů, see
+// generateTournamentMatches/startTournament in tournamentService.ts). No
+// online-match linkage, no result recording, no standings/playoff generation
+// yet — matches are created as "scheduled" placeholders only.
+model TournamentMatch {
+  id            String    @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  phase         String
+  roundNumber   Int
+  matchNumber   Int
+  homeTeamId    String
+  homeTeam      TournamentTeam @relation("TournamentMatchHomeTeam", fields: [homeTeamId], references: [id])
+  awayTeamId    String
+  awayTeam      TournamentTeam @relation("TournamentMatchAwayTeam", fields: [awayTeamId], references: [id])
+  homeScore     Int?
+  awayScore     Int?
+  winnerTeamId  String?
+  status        String    @default("scheduled")
+  onlineMatchId String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  // Defense-in-depth against a duplicate match set from a double-start —
+  // the real guard is the atomic Tournament.status compare-and-swap in
+  // startTournament(), but this also makes a duplicate insert impossible at
+  // the DB level regardless of caller.
+  @@unique([tournamentId, roundNumber, matchNumber])
+  @@index([tournamentId])
+  @@index([tournamentId, phase])
 }
 
 // Noční hlídač (nocni-hlidac.vercel.app) — samostatný projekt, žádný vztah k

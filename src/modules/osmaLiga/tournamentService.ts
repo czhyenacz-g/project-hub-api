@@ -1,6 +1,7 @@
-import { Prisma, Tournament, TournamentTeam } from '@prisma/client';
+import { Prisma, Tournament, TournamentTeam, TournamentMatch } from '@prisma/client';
 import { db } from '../../db.js';
 import { CreateTournamentInput } from './tournamentValidation.js';
+import { generateTournamentMatches } from './tournamentMatchGenerator.js';
 
 export type TournamentFormat = 'derby' | 'league_top2_final' | 'league_top4_playoff';
 
@@ -39,7 +40,7 @@ async function generateUniquePublicCode(): Promise<string> {
   throw new Error('Failed to generate a unique tournament public code');
 }
 
-export type TournamentWithTeams = Tournament & { teams: TournamentTeam[] };
+export type TournamentWithTeams = Tournament & { teams: TournamentTeam[]; matches: TournamentMatch[] };
 
 export async function createTournament(input: CreateTournamentInput): Promise<TournamentWithTeams> {
   // Backend is the source of truth for format — never trust a client-sent value.
@@ -63,7 +64,10 @@ export async function createTournament(input: CreateTournamentInput): Promise<To
         })),
       },
     },
-    include: { teams: { orderBy: { slotNumber: 'asc' } } },
+    include: {
+      teams: { orderBy: { slotNumber: 'asc' } },
+      matches: { orderBy: [{ roundNumber: 'asc' }, { matchNumber: 'asc' }] },
+    },
   });
 }
 
@@ -73,7 +77,10 @@ export async function createTournament(input: CreateTournamentInput): Promise<To
 export async function getTournamentByPublicCode(publicCode: string): Promise<TournamentWithTeams | null> {
   return db.tournament.findFirst({
     where: { publicCode: { equals: publicCode, mode: Prisma.QueryMode.insensitive } },
-    include: { teams: { orderBy: { slotNumber: 'asc' } } },
+    include: {
+      teams: { orderBy: { slotNumber: 'asc' } },
+      matches: { orderBy: [{ roundNumber: 'asc' }, { matchNumber: 'asc' }] },
+    },
   });
 }
 
@@ -140,6 +147,68 @@ export async function claimTournamentTeam(
   return { outcome: 'claimed', tournament: updated };
 }
 
+export type StartTournamentResult =
+  | { outcome: 'started'; tournament: TournamentWithTeams }
+  | { outcome: 'tournament_not_found' }
+  | { outcome: 'forbidden' }
+  | { outcome: 'not_open' }
+  | { outcome: 'teams_not_full' }
+  | { outcome: 'already_started' };
+
+/**
+ * POST /api/osma-liga/tournaments/:code/start
+ *
+ * Guards against a concurrent double-start (two clicks racing, or two tabs)
+ * the same way claimTournamentTeam guards a team claim: an atomic conditional
+ * `updateMany` whose WHERE clause requires `status: 'open'` acts as a
+ * compare-and-swap on the Tournament row. Postgres serializes concurrent
+ * UPDATEs against the same row, so only one of two truly-simultaneous start
+ * attempts can still match by the time it executes inside the transaction —
+ * the loser's `updateMany` reports `count: 0` and the transaction returns
+ * `raced: true` without ever calling `createMany`, so duplicate
+ * TournamentMatch rows can never be committed. The
+ * `(tournamentId, roundNumber, matchNumber)` unique index in schema.prisma
+ * is defense-in-depth on top of that, not the primary guard.
+ */
+export async function startTournament(publicCode: string, userId: string): Promise<StartTournamentResult> {
+  const tournament = await getTournamentByPublicCode(publicCode);
+  if (!tournament) return { outcome: 'tournament_not_found' };
+  if (tournament.createdByUserId !== userId) return { outcome: 'forbidden' };
+  if (tournament.status !== 'open') return { outcome: 'not_open' };
+  if (tournament.teams.some((t) => !t.claimedByUserId)) return { outcome: 'teams_not_full' };
+  if (tournament.matches.length > 0) return { outcome: 'already_started' };
+
+  const drafts = generateTournamentMatches(tournament.teams, tournament.format);
+
+  const { raced } = await db.$transaction(async (tx) => {
+    const statusUpdate = await tx.tournament.updateMany({
+      where: { id: tournament.id, status: 'open' },
+      data: { status: 'in_progress', startedAt: new Date() },
+    });
+    if (statusUpdate.count === 0) {
+      return { raced: true as const };
+    }
+    await tx.tournamentMatch.createMany({
+      data: drafts.map((d) => ({
+        tournamentId: tournament.id,
+        phase: d.phase,
+        roundNumber: d.roundNumber,
+        matchNumber: d.matchNumber,
+        homeTeamId: d.homeTeamId,
+        awayTeamId: d.awayTeamId,
+        status: 'scheduled',
+      })),
+    });
+    return { raced: false as const };
+  });
+
+  if (raced) return { outcome: 'already_started' };
+
+  const updated = await getTournamentByPublicCode(publicCode);
+  if (!updated) return { outcome: 'tournament_not_found' };
+  return { outcome: 'started', tournament: updated };
+}
+
 export function serializeTournament(tournament: TournamentWithTeams) {
   return {
     id: tournament.id,
@@ -162,6 +231,22 @@ export function serializeTournament(tournament: TournamentWithTeams) {
       claimedAt: team.claimedAt,
       seed: team.seed,
       finalRank: team.finalRank,
+    })),
+    matches: tournament.matches.map((match) => ({
+      id: match.id,
+      tournamentId: match.tournamentId,
+      phase: match.phase,
+      roundNumber: match.roundNumber,
+      matchNumber: match.matchNumber,
+      homeTeamId: match.homeTeamId,
+      awayTeamId: match.awayTeamId,
+      homeScore: match.homeScore,
+      awayScore: match.awayScore,
+      winnerTeamId: match.winnerTeamId,
+      status: match.status,
+      onlineMatchId: match.onlineMatchId,
+      startedAt: match.startedAt,
+      finishedAt: match.finishedAt,
     })),
   };
 }

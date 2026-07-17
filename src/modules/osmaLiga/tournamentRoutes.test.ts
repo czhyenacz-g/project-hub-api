@@ -13,6 +13,11 @@ const authHeaders = { 'x-project-hub-key': API_KEY };
 
 const TEST_DISCORD_ID = 'test-discord-tournament-creator';
 const TEST_DISCORD_ID_2 = 'test-discord-tournament-claimer-2';
+// Extra pool for start/scheduling tests that need up to 8 distinct claimers
+// (one team can only ever be claimed by one user — see the DB unique index
+// on (tournamentId, claimedByUserId) in schema.prisma).
+const EXTRA_DISCORD_IDS = Array.from({ length: 6 }, (_, i) => `test-discord-tournament-claimer-${i + 3}`);
+const ALL_TEST_DISCORD_IDS = [TEST_DISCORD_ID, TEST_DISCORD_ID_2, ...EXTRA_DISCORD_IDS];
 
 async function buildApp() {
   const app = Fastify();
@@ -21,13 +26,13 @@ async function buildApp() {
 }
 
 async function cleanupTestTournaments(): Promise<void> {
-  // Tournament -> TournamentTeam cascades on delete (see schema.prisma).
+  // Tournament -> TournamentTeam / TournamentMatch cascade on delete (see schema.prisma).
   await db.tournament.deleteMany({ where: { createdByUserId: { in: await testUserIds() } } });
 }
 
 async function testUserIds(): Promise<string[]> {
   const users = await db.osmaUser.findMany({
-    where: { discordId: { in: [TEST_DISCORD_ID, TEST_DISCORD_ID_2] } },
+    where: { discordId: { in: ALL_TEST_DISCORD_IDS } },
     select: { id: true },
   });
   return users.map((u) => u.id);
@@ -35,6 +40,7 @@ async function testUserIds(): Promise<string[]> {
 
 let creatorUserId: string;
 let secondUserId: string;
+let extraUserIds: string[];
 
 beforeAll(async () => {
   if (!API_KEY) {
@@ -55,6 +61,15 @@ beforeAll(async () => {
     create: { discordId: TEST_DISCORD_ID_2, username: 'tournament-tester-2' },
   });
   secondUserId = user2.id;
+  extraUserIds = [];
+  for (const [i, discordId] of EXTRA_DISCORD_IDS.entries()) {
+    const extraUser = await db.osmaUser.upsert({
+      where: { discordId },
+      update: {},
+      create: { discordId, username: `tournament-tester-${i + 3}` },
+    });
+    extraUserIds.push(extraUser.id);
+  }
 });
 
 afterEach(async () => {
@@ -63,7 +78,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   await cleanupTestTournaments();
-  await db.osmaUser.deleteMany({ where: { discordId: { in: [TEST_DISCORD_ID, TEST_DISCORD_ID_2] } } });
+  await db.osmaUser.deleteMany({ where: { discordId: { in: ALL_TEST_DISCORD_IDS } } });
   await db.$disconnect();
 });
 
@@ -470,5 +485,280 @@ describe('POST /api/osma-liga/tournaments/:code/teams/:teamId/claim', () => {
       payload: { userId: creatorUserId },
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('POST /api/osma-liga/tournaments/:code/start', () => {
+  type TestTournament = {
+    publicCode: string;
+    status: string;
+    teams: { id: string; claimedByUserId: string | null }[];
+    matches: { id: string; phase: string; roundNumber: number; matchNumber: number; homeTeamId: string; awayTeamId: string; status: string }[];
+  };
+
+  async function createTestTournament(app: Awaited<ReturnType<typeof buildApp>>, playerCount: number): Promise<TestTournament> {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/osma-liga/tournaments',
+      headers: authHeaders,
+      payload: { name: 'Start test', playerCount, createdByUserId: creatorUserId },
+    });
+    return res.json().tournament as TestTournament;
+  }
+
+  // Claims teams[0..claimerIds.length-1] — pass fewer claimerIds than teams
+  // to leave some teams intentionally unclaimed for the "not all teams
+  // claimed" test.
+  async function claimAllTeams(
+    app: Awaited<ReturnType<typeof buildApp>>,
+    tournament: TestTournament,
+    claimerIds: string[],
+  ): Promise<void> {
+    for (let i = 0; i < claimerIds.length; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/osma-liga/tournaments/${tournament.publicCode}/teams/${tournament.teams[i].id}/claim`,
+        headers: authHeaders,
+        payload: { userId: claimerIds[i] },
+      });
+      if (res.statusCode !== 200) {
+        throw new Error(`Failed to claim team ${i}: ${res.statusCode} ${res.body}`);
+      }
+    }
+  }
+
+  function claimerPoolFor(playerCount: number): string[] {
+    return [creatorUserId, secondUserId, ...extraUserIds].slice(0, playerCount);
+  }
+
+  it('requires the api key', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 2);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('rejects an unknown userId', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 2);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: 'does-not-exist' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 404 for an unknown publicCode', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/osma-liga/tournaments/zzzzzz/start',
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('rejects a non-creator user', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 2);
+    await claimAllTeams(app, tournament, claimerPoolFor(2));
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: secondUserId },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('rejects starting before all teams are claimed', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 4);
+    // Claim only 3 of 4 teams.
+    await claimAllTeams(app, tournament, claimerPoolFor(3));
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('rejects starting a tournament that is not open', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 2);
+    await claimAllTeams(app, tournament, claimerPoolFor(2));
+    await db.tournament.update({ where: { publicCode: tournament.publicCode }, data: { status: 'closed' } });
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('creator starts a fully-claimed 2-player tournament and generates 3 derby matches', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 2);
+    await claimAllTeams(app, tournament, claimerPoolFor(2));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.tournament.status).toBe('in_progress');
+    expect(body.tournament.startedAt).not.toBeNull();
+    expect(body.tournament.matches).toHaveLength(3);
+    expect(body.tournament.matches.every((m: { phase: string }) => m.phase === 'derby')).toBe(true);
+    expect(body.tournament.matches.every((m: { status: string }) => m.status === 'scheduled')).toBe(true);
+    expect(body.tournament.matches.every((m: { homeScore: number | null }) => m.homeScore === null)).toBe(true);
+  });
+
+  it('cannot start the same tournament twice', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 2);
+    await claimAllTeams(app, tournament, claimerPoolFor(2));
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(first.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(second.statusCode).toBe(409);
+
+    // No duplicate matches were created by the second attempt.
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}`,
+      headers: authHeaders,
+    });
+    expect(detail.json().tournament.matches).toHaveLength(3);
+  });
+
+  it('starting concurrently (double click) never creates duplicate matches', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 4);
+    await claimAllTeams(app, tournament, claimerPoolFor(4));
+
+    const [res1, res2] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+        headers: authHeaders,
+        payload: { userId: creatorUserId },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+        headers: authHeaders,
+        payload: { userId: creatorUserId },
+      }),
+    ]);
+    const statuses = [res1.statusCode, res2.statusCode].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}`,
+      headers: authHeaders,
+    });
+    expect(detail.json().tournament.matches).toHaveLength(6);
+  });
+
+  it.each([
+    [3, 3],
+    [4, 6],
+    [5, 10],
+    [8, 28],
+  ])('starting a %i-player tournament generates %i league matches with no self-matches or repeated pairings', async (playerCount, expectedMatches) => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, playerCount);
+    await claimAllTeams(app, tournament, claimerPoolFor(playerCount));
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(200);
+    const matches = res.json().tournament.matches as { homeTeamId: string; awayTeamId: string; phase: string }[];
+    expect(matches).toHaveLength(expectedMatches);
+    expect(matches.every((m) => m.phase === 'league')).toBe(true);
+    expect(matches.every((m) => m.homeTeamId !== m.awayTeamId)).toBe(true);
+
+    const seenPairs = new Set<string>();
+    for (const m of matches) {
+      const key = [m.homeTeamId, m.awayTeamId].sort().join('|');
+      expect(seenPairs.has(key)).toBe(false);
+      seenPairs.add(key);
+    }
+  });
+
+  it('GET detail after start returns the matches sorted by roundNumber then matchNumber', async () => {
+    const app = await buildApp();
+    const tournament = await createTestTournament(app, 4);
+    await claimAllTeams(app, tournament, claimerPoolFor(4));
+    await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}`,
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(200);
+    const matches = res.json().tournament.matches as { roundNumber: number; matchNumber: number }[];
+    expect(matches).toHaveLength(6);
+    const sorted = [...matches].sort((a, b) => a.roundNumber - b.roundNumber || a.matchNumber - b.matchNumber);
+    expect(matches).toEqual(sorted);
+  });
+});
+
+describe('GET /api/osma-liga/tournaments/:code returns empty matches before start', () => {
+  it('returns matches: [] for a freshly created tournament', async () => {
+    const app = await buildApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/osma-liga/tournaments',
+      headers: authHeaders,
+      payload: { name: 'No matches yet', playerCount: 4, createdByUserId: creatorUserId },
+    });
+    const { publicCode } = createRes.json().tournament;
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${publicCode}`,
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().tournament.matches).toEqual([]);
   });
 });
