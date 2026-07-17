@@ -1,8 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { apiKeyAuth } from '../../shared/apiKeyAuth.js';
 import { sendError } from '../../shared/errors.js';
-import { CreateTournamentSchema, ClaimTournamentTeamSchema, StartTournamentSchema } from './tournamentValidation.js';
-import { createTournament, getTournamentByPublicCode, claimTournamentTeam, startTournament, serializeTournament } from './tournamentService.js';
+import { CreateTournamentSchema, ClaimTournamentTeamSchema, StartTournamentSchema, PlayTournamentMatchSchema } from './tournamentValidation.js';
+import {
+  createTournament, getTournamentByPublicCode, claimTournamentTeam, startTournament, playTournamentMatch,
+  serializeTournament, serializeTournamentMatch,
+} from './tournamentService.js';
 import { db } from '../../db.js';
 
 export async function tournamentRoutes(app: FastifyInstance): Promise<void> {
@@ -104,6 +107,53 @@ export async function tournamentRoutes(app: FastifyInstance): Promise<void> {
           return sendError(reply, 409, 'Tournament has already been started');
         case 'started':
           return reply.send({ ok: true, tournament: serializeTournament(result.tournament) });
+      }
+    },
+  );
+
+  // POST /api/osma-liga/tournaments/:code/matches/:matchId/play — start or resume the
+  // online game session for a scheduled/in-progress tournament match
+  app.post(
+    '/api/osma-liga/tournaments/:code/matches/:matchId/play',
+    { preHandler: apiKeyAuth },
+    async (request, reply) => {
+      const { code, matchId } = request.params as { code: string; matchId: string };
+      const parsed = PlayTournamentMatchSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return sendError(reply, 400, parsed.error.issues.map((i) => i.message).join(', '));
+      }
+
+      const user = await db.osmaUser.findUnique({ where: { id: parsed.data.userId } });
+      if (!user) {
+        return sendError(reply, 400, 'Invalid userId');
+      }
+
+      const result = await playTournamentMatch(code, matchId, parsed.data.userId);
+      switch (result.outcome) {
+        case 'tournament_not_found':
+          return sendError(reply, 404, 'Tournament not found');
+        case 'match_not_found':
+          return sendError(reply, 404, 'Match not found');
+        case 'teams_not_claimed':
+          return sendError(reply, 409, 'Both teams must be claimed before playing this match');
+        case 'forbidden':
+          return sendError(reply, 403, 'Only the players of this match can start it');
+        case 'tournament_not_in_progress':
+          return sendError(reply, 409, 'Tournament is not in progress');
+        case 'match_finished':
+          return sendError(reply, 409, 'Match has already finished');
+        case 'match_not_playable':
+          return sendError(reply, 409, 'Match is not in a playable state');
+        case 'created':
+        case 'existing':
+          return reply.send({
+            ok: true,
+            onlineMatchId: result.onlineMatchId,
+            joinUrlPath: result.joinUrlPath,
+            ...(result.playerToken ? { playerToken: result.playerToken } : {}),
+            match: serializeTournamentMatch(result.match),
+            tournament: serializeTournament(result.tournament),
+          });
       }
     },
   );

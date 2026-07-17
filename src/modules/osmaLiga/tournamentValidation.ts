@@ -65,3 +65,9 @@ export const StartTournamentSchema = z.object({
 });
 
 export type StartTournamentInput = z.infer<typeof StartTournamentSchema>;
+
+export const PlayTournamentMatchSchema = z.object({
+  userId: z.string().min(1),
+});
+
+export type PlayTournamentMatchInput = z.infer<typeof PlayTournamentMatchSchema>;

@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { db } from '../../db.js';
 import { tournamentRoutes } from './tournamentRoutes.js';
 import { determineTournamentFormat } from './tournamentService.js';
+import { getGame } from './onlineGames.js';
 
 // Route-level integration tests against the local dev Postgres (see
 // docker-compose.yml `project-hub-postgres`, DATABASE_URL in .env loaded by
@@ -760,5 +761,309 @@ describe('GET /api/osma-liga/tournaments/:code returns empty matches before star
     });
     expect(res.statusCode).toBe(200);
     expect(res.json().tournament.matches).toEqual([]);
+  });
+});
+
+describe('POST /api/osma-liga/tournaments/:code/matches/:matchId/play', () => {
+  type TestMatch = {
+    id: string;
+    tournamentId: string;
+    status: string;
+    onlineMatchId: string | null;
+    startedAt: string | null;
+    homeTeamId: string;
+    awayTeamId: string;
+  };
+  type StartedTournament = {
+    id: string;
+    publicCode: string;
+    status: string;
+    teams: { id: string; claimedByUserId: string | null }[];
+    matches: TestMatch[];
+  };
+
+  async function createAndStartTournament(
+    app: Awaited<ReturnType<typeof buildApp>>,
+    playerCount: number,
+  ): Promise<StartedTournament> {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/osma-liga/tournaments',
+      headers: authHeaders,
+      payload: { name: 'Play test', playerCount, createdByUserId: creatorUserId },
+    });
+    const tournament = createRes.json().tournament as { publicCode: string; teams: { id: string }[] };
+
+    const claimers = [creatorUserId, secondUserId, ...extraUserIds].slice(0, playerCount);
+    for (let i = 0; i < playerCount; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/osma-liga/tournaments/${tournament.publicCode}/teams/${tournament.teams[i].id}/claim`,
+        headers: authHeaders,
+        payload: { userId: claimers[i] },
+      });
+      if (res.statusCode !== 200) {
+        throw new Error(`Failed to claim team ${i}: ${res.statusCode} ${res.body}`);
+      }
+    }
+
+    const startRes = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/start`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    if (startRes.statusCode !== 200) {
+      throw new Error(`Failed to start tournament: ${startRes.statusCode} ${startRes.body}`);
+    }
+    return startRes.json().tournament as StartedTournament;
+  }
+
+  it('requires the api key', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('rejects an unknown userId', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: 'does-not-exist' },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 404 for an unknown tournament code', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/zzzzzz/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns 404 for an unknown matchId', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/does-not-exist/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns 404 when the match belongs to a different tournament', async () => {
+    const app = await buildApp();
+    const tournamentA = await createAndStartTournament(app, 2);
+    const tournamentB = await createAndStartTournament(app, 2);
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournamentA.publicCode}/matches/${tournamentB.matches[0].id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('rejects a user who is not a player of the match', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: extraUserIds[0] },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('lets the home team player start a scheduled match', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId }, // creator claimed team 1 (home) in a 2-player tournament
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.onlineMatchId).toBeTruthy();
+    expect(body.joinUrlPath).toBe(`/hra/online/${body.onlineMatchId}`);
+    expect(body.playerToken).toBeTruthy();
+    expect(body.match.status).toBe('in_progress');
+    expect(body.match.onlineMatchId).toBe(body.onlineMatchId);
+    expect(body.match.startedAt).not.toBeNull();
+
+    // The room really was created via the existing online-games store —
+    // no parallel system — and carries the tournament metadata.
+    const room = getGame(body.onlineMatchId);
+    expect(room).not.toBeNull();
+    expect(room!.tournamentId).toBe(tournament.id);
+    expect(room!.tournamentMatchId).toBe(match.id);
+    expect(room!.homeUserId).toBe(creatorUserId);
+  });
+
+  it('lets the away team player start a scheduled match', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: secondUserId }, // secondUserId claimed team 2 (away)
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.onlineMatchId).toBeTruthy();
+    expect(body.match.status).toBe('in_progress');
+  });
+
+  it('returns the existing onlineMatchId on a second call without creating a new game', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+
+    const first = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    const firstOnlineMatchId = first.json().onlineMatchId;
+
+    const second = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: secondUserId },
+    });
+    expect(second.statusCode).toBe(200);
+    const secondBody = second.json();
+    expect(secondBody.onlineMatchId).toBe(firstOnlineMatchId);
+    // No fresh host token minted for the second (non-creating) caller.
+    expect(secondBody.playerToken).toBeUndefined();
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}`,
+      headers: authHeaders,
+    });
+    const detailMatch = detail.json().tournament.matches.find((m: TestMatch) => m.id === match.id);
+    expect(detailMatch.onlineMatchId).toBe(firstOnlineMatchId);
+    expect(detailMatch.status).toBe('in_progress');
+  });
+
+  it('concurrent play calls (double click) never create two online games', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+
+    const [res1, res2] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+        headers: authHeaders,
+        payload: { userId: creatorUserId },
+      }),
+      app.inject({
+        method: 'POST',
+        url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+        headers: authHeaders,
+        payload: { userId: secondUserId },
+      }),
+    ]);
+    expect(res1.statusCode).toBe(200);
+    expect(res2.statusCode).toBe(200);
+    const id1 = res1.json().onlineMatchId;
+    const id2 = res2.json().onlineMatchId;
+    expect(id1).toBe(id2);
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}`,
+      headers: authHeaders,
+    });
+    const detailMatch = detail.json().tournament.matches.find((m: TestMatch) => m.id === match.id);
+    expect(detailMatch.onlineMatchId).toBe(id1);
+  });
+
+  it('rejects playing when the tournament is not in_progress', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    await db.tournament.update({ where: { id: tournament.id }, data: { status: 'open' } });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('rejects playing a finished match', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 2);
+    const match = tournament.matches[0];
+    await db.tournamentMatch.update({ where: { id: match.id }, data: { status: 'finished' } });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it('GET detail after playing returns match.status = in_progress and onlineMatchId', async () => {
+    const app = await buildApp();
+    const tournament = await createAndStartTournament(app, 4);
+    const match = tournament.matches[0];
+    await app.inject({
+      method: 'POST',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}/matches/${match.id}/play`,
+      headers: authHeaders,
+      payload: { userId: creatorUserId },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/osma-liga/tournaments/${tournament.publicCode}`,
+      headers: authHeaders,
+    });
+    expect(res.statusCode).toBe(200);
+    const detailMatch = res.json().tournament.matches.find((m: TestMatch) => m.id === match.id);
+    expect(detailMatch.status).toBe('in_progress');
+    expect(detailMatch.onlineMatchId).toBeTruthy();
+    expect(detailMatch.startedAt).not.toBeNull();
+
+    // Other, untouched matches stay scheduled with no onlineMatchId.
+    const other = res.json().tournament.matches.find((m: TestMatch) => m.id !== match.id);
+    expect(other.status).toBe('scheduled');
+    expect(other.onlineMatchId).toBeNull();
   });
 });

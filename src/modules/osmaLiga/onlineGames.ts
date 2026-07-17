@@ -59,6 +59,12 @@ export type OnlineGameRoom = {
   trainingChallengeClubId: string | null;
   // Metadata only for now — no engine integration. See onlineGames.ts top-level comment.
   opponentProfile: 'standard' | 'trainingChallenge';
+  // Set only when this room was created by tournamentService.ts#playTournamentMatch
+  // for a scheduled TournamentMatch — bookkeeping only, no engine/socket
+  // behaviour depends on it. null for every other room (regular lobby,
+  // training challenge).
+  tournamentId: string | null;
+  tournamentMatchId: string | null;
 };
 
 type UserInfo = {
@@ -102,7 +108,10 @@ export function cleanupExpired(): void {
   }
 }
 
-export function createGame(userInfo?: UserInfo): OnlineGameRoom {
+export function createGame(
+  userInfo?: UserInfo,
+  tournamentMeta?: { tournamentId: string; tournamentMatchId: string } | null,
+): OnlineGameRoom {
   cleanupExpired();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ONLINE_GAME_TTL_MINUTES * 60 * 1000);
@@ -140,6 +149,8 @@ export function createGame(userInfo?: UserInfo): OnlineGameRoom {
     trainingChallengeExpiresAt: null,
     trainingChallengeClubId: null,
     opponentProfile: 'standard',
+    tournamentId: tournamentMeta?.tournamentId ?? null,
+    tournamentMatchId: tournamentMeta?.tournamentMatchId ?? null,
   };
   store.set(room.code, room);
   return room;
@@ -186,6 +197,8 @@ export function createTrainingChallenge(clubId: string, clubSlug: string, clubNa
     trainingChallengeExpiresAt: challengeExpiresAt.toISOString(),
     trainingChallengeClubId: clubId,
     opponentProfile: 'trainingChallenge',
+    tournamentId: null,
+    tournamentMatchId: null,
   };
   store.set(room.code, room);
   return room;
