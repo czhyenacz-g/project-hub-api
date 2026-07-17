@@ -163,6 +163,12 @@ model TournamentTeam {
   createdAt       DateTime  @default(now())
 
   @@unique([tournamentId, slotNumber])
+  // Enforces "one claimed team per user per tournament" at the DB level —
+  // Postgres treats NULL as distinct for uniqueness, so any number of
+  // unclaimed (claimedByUserId: null) teams are unaffected, but a second row
+  // with the same (tournamentId, claimedByUserId) can never be committed even
+  // under a race (see claimTournamentTeam in tournamentService.ts).
+  @@unique([tournamentId, claimedByUserId])
   @@index([tournamentId])
 }
 

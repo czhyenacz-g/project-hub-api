@@ -77,6 +77,69 @@ export async function getTournamentByPublicCode(publicCode: string): Promise<Tou
   });
 }
 
+export type ClaimTournamentTeamResult =
+  | { outcome: 'claimed'; tournament: TournamentWithTeams }
+  | { outcome: 'tournament_not_found' }
+  | { outcome: 'team_not_found' }
+  | { outcome: 'not_open' }
+  | { outcome: 'team_taken' }
+  | { outcome: 'user_already_has_team' };
+
+/**
+ * POST /api/osma-liga/tournaments/:code/teams/:teamId/claim
+ *
+ * Deliberately NOT `findUnique` + unconditional `update` (lost-update race —
+ * two concurrent claims on the same team could both read "unclaimed" before
+ * either writes). Instead this uses an atomic, conditional `updateMany` whose
+ * WHERE clause also requires `claimedByUserId: null`: Postgres serializes
+ * concurrent UPDATEs against the same row via its own row lock, so only ONE
+ * of two truly-simultaneous claimers can still match by the time it executes
+ * — the loser's `updateMany` reports `count: 0`, never a silently
+ * overwritten claim. Mirrors the pattern in
+ * nocniHlidac/playerProfileService.ts#updateObject13PlayerProfile.
+ *
+ * The "does this user already have a team here" check is done as a pre-check
+ * for a clean error message, but the real guarantee against a user racing
+ * themselves into two teams is the DB-level unique index on
+ * (tournamentId, claimedByUserId) — see schema.prisma. A unique-constraint
+ * violation on the update is caught below and mapped to the same outcome.
+ */
+export async function claimTournamentTeam(
+  publicCode: string,
+  teamId: string,
+  userId: string,
+): Promise<ClaimTournamentTeamResult> {
+  const tournament = await getTournamentByPublicCode(publicCode);
+  if (!tournament) return { outcome: 'tournament_not_found' };
+  if (tournament.status !== 'open') return { outcome: 'not_open' };
+
+  const team = tournament.teams.find((t) => t.id === teamId);
+  if (!team) return { outcome: 'team_not_found' };
+
+  if (tournament.teams.some((t) => t.claimedByUserId === userId)) {
+    return { outcome: 'user_already_has_team' };
+  }
+
+  try {
+    const updateResult = await db.tournamentTeam.updateMany({
+      where: { id: teamId, tournamentId: tournament.id, claimedByUserId: null },
+      data: { claimedByUserId: userId, claimedAt: new Date() },
+    });
+    if (updateResult.count === 0) {
+      return { outcome: 'team_taken' };
+    }
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return { outcome: 'user_already_has_team' };
+    }
+    throw err;
+  }
+
+  const updated = await getTournamentByPublicCode(publicCode);
+  if (!updated) return { outcome: 'tournament_not_found' };
+  return { outcome: 'claimed', tournament: updated };
+}
+
 export function serializeTournament(tournament: TournamentWithTeams) {
   return {
     id: tournament.id,
