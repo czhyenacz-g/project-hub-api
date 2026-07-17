@@ -41,6 +41,13 @@ export const ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE = 300;
 // (Q / PŘEP.) is unaffected. Mirrors osma-liga/game/constants.ts.
 export const AUTO_PLAYER_SWITCH_COOLDOWN_MS = 1000;
 
+// While a team's input is holding a movement direction (and for this long
+// afterward), no automatic active-player change is allowed for that team —
+// neither the distance-based auto-pick above nor the teammate-ball-receive
+// takeover further down in tick.ts. Manual switching (Q / PŘEP.) is
+// unaffected. Mirrors osma-liga/game/constants.ts AUTO_SWITCH_INPUT_LOCK_MS.
+export const AUTO_SWITCH_INPUT_LOCK_MS = 200;
+
 // Baseline same-team anti-overlap (KISS) — independent of supportSpacing /
 // teammateSupportMode below, so it always applies regardless of behavior
 // config. Mirrors osma-liga/game/constants.ts.

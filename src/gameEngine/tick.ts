@@ -4,7 +4,7 @@ import {
   PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
   KICK_TAP_FORCE_MULTIPLIER, KICK_MAX_CHARGE_FORCE_MULTIPLIER, KICK_MAX_CHARGE_MS,
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
-  AUTO_PLAYER_SWITCH_COOLDOWN_MS,
+  AUTO_PLAYER_SWITCH_COOLDOWN_MS, AUTO_SWITCH_INPUT_LOCK_MS,
   MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   BALL_RETENTION_RADIUS, BALL_RETENTION_NO_OPPONENT_RADIUS, BALL_RETENTION_MAX_BALL_SPEED,
@@ -217,6 +217,7 @@ function findAutoActivePlayer(
   team: 'home' | 'away',
   removedIds: Set<string>,
   dt: number,
+  canAutoSwitch: boolean,
 ): OnlinePlayer | null {
   let nearest: OnlinePlayer | null = null;
   let nearestDist = Infinity;
@@ -240,7 +241,7 @@ function findAutoActivePlayer(
     ? state.players.find((p) => p.team === team && p.id === currentId) ?? null
     : null;
   if (!currentActive || !nearest) return nearest;
-  if (state.autoSwitchCooldownRemaining[team] > 0) return currentActive;
+  if (state.autoSwitchCooldownRemaining[team] > 0 || !canAutoSwitch) return currentActive;
 
   const currentDist = dist(currentActive.x, currentActive.y, state.ball.x, state.ball.y);
   const shouldSwitch = nearest.id !== currentActive.id && nearestDist + computeSwitchMargin(currentDist) < currentDist;
@@ -276,7 +277,21 @@ function resolveActivePlayer(
   const teamPlayers = state.players.filter((p) => p.team === team && !removedIds.has(p.id));
   if (teamPlayers.length === 0) return null;
 
-  const auto = findAutoActivePlayer(state, team, removedIds, dt);
+  // While this team's input holds a movement direction, they clearly intend
+  // to keep controlling whichever figure they're currently moving — no
+  // automatic active-player change is allowed (distance-based auto-pick
+  // here, and the teammate-ball-receive takeover further down in tickGame).
+  // The lock stays engaged for AUTO_SWITCH_INPUT_LOCK_MS after input is
+  // released too. Manual switching (Q / PŘEP.) below is unaffected.
+  const hasMovementInput = input.up || input.down || input.left || input.right;
+  if (hasMovementInput) {
+    state.autoSwitchInputLockRemaining[team] = AUTO_SWITCH_INPUT_LOCK_MS / 1000;
+  } else if (state.autoSwitchInputLockRemaining[team] > 0) {
+    state.autoSwitchInputLockRemaining[team] = Math.max(0, state.autoSwitchInputLockRemaining[team] - dt);
+  }
+  const canAutoSwitch = state.autoSwitchInputLockRemaining[team] <= 0;
+
+  const auto = findAutoActivePlayer(state, team, removedIds, dt, canAutoSwitch);
   state.autoActivePlayerId[team] = auto ? auto.id : null;
 
   const switchEdge = input.switchPlayer && !state.switchKeyWasDown[team];
@@ -310,11 +325,17 @@ function resolveActivePlayer(
       state.lastTouchPlayerId = previousActive.id;
       state.manualActivePlayerId[team] = passTarget.id;
       state.manualLockRemaining[team] = passAndSwitchConfig.manualLockSeconds;
+      // While movement is held, the background auto-pick must follow the
+      // deliberate switch too — otherwise it silently reverts to whoever it
+      // was tracking before the switch once the manual lock's own timer
+      // expires, even though the player never let go of the movement key.
+      if (!canAutoSwitch) state.autoActivePlayerId[team] = passTarget.id;
     } else {
       const nextActive = findNearestTeammateToBall(teamPlayers, state.ball, previousActive.id);
       if (nextActive) {
         state.manualActivePlayerId[team] = nextActive.id;
         state.manualLockRemaining[team] = MANUAL_SWITCH_LOCK_DURATION;
+        if (!canAutoSwitch) state.autoActivePlayerId[team] = nextActive.id;
       }
       // No other teammate available (e.g. everyone else temporarily removed)
       // — keep the current active player, don't touch the manual lock.
@@ -565,9 +586,14 @@ export function tickGame(
   // non-active teammate makes them the new active player (short lock)
   // instead of just bumping off them like step 7 above. Own (human-driven)
   // teams only — AI-driven teams (e.g. training challenge home) are
-  // unaffected. Mirrors osma-liga/game/updateGame.ts.
+  // unaffected. Mirrors osma-liga/game/updateGame.ts. Also gated by the same
+  // held-movement lock as the auto-pick in resolveActivePlayer above — this
+  // is an involuntary takeover, so a player steering the ball toward their
+  // own repositioning teammate must not have control silently handed away
+  // mid-dribble (see AUTO_SWITCH_INPUT_LOCK_MS).
   for (const team of teams) {
     if (!behaviorConfig[team].usesChargedKick) continue;
+    if (state.autoSwitchInputLockRemaining[team] > 0) continue;
     const activePlayer = state.players.find((p) => p.team === team && p.active);
     if (!activePlayer) continue;
     const teammates = state.players.filter((p) => p.team === team && !removedIds.has(p.id));

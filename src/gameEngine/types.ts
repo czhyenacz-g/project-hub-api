@@ -73,6 +73,12 @@ export interface OnlineGameState {
   // Cooldown (seconds) before the automatic pick is allowed to switch again
   // for that team — see AUTO_PLAYER_SWITCH_COOLDOWN_MS.
   autoSwitchCooldownRemaining: { home: number; away: number };
+  // Counts down from AUTO_SWITCH_INPUT_LOCK_MS/1000 (seconds), per team,
+  // refreshed every tick that team's input holds a movement direction. While
+  // > 0, no automatic active-player change is allowed for that team — see
+  // AUTO_SWITCH_INPUT_LOCK_MS. Mirrors the bot engine's game/types.ts
+  // autoSwitchInputLockRemaining.
+  autoSwitchInputLockRemaining: { home: number; away: number };
   manualActivePlayerId: { home: string | null; away: string | null };
   manualLockRemaining: { home: number; away: number };
   switchKeyWasDown: { home: boolean; away: boolean };
