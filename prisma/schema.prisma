@@ -221,10 +221,44 @@ model NocniHlidacPlayer {
   currentRun    Int       @default(0)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  // `lastLoginAt` už existoval PŘED aktivitním logováním (touched on every
+  // /nocni-hlidac/player/upsert, tedy i na každý Next.js /api/auth/me
+  // self-healing check) — nový POST /nocni-hlidac/player/login (viz
+  // activityService.ts) na něj navíc navazuje, ale nemění jeho stávající
+  // upsert-time sémantiku (viz report "Idempotence a existující lastLoginAt").
   lastLoginAt   DateTime?
+  // Aktivitní logování (viz src/modules/nocniHlidac/activityService.ts,
+  // docs/operations/nocni-hlidac.md) — čtyři nová nullable pole, žádná
+  // duplicita s `lastLoginAt` výše.
+  lastPlayedAt     DateTime?
+  lastActivityAt   DateTime?
+  lastClient       String?   @db.VarChar(32)
+  lastBuildVersion String?   @db.VarChar(64)
+  activityEvents   NocniHlidacPlayerActivityEvent[]
 
   @@index([discordUserId])
   @@index([bestRun(sort: Desc), currentRun(sort: Desc)])
+  @@index([lastActivityAt(sort: Desc)])
+}
+
+// Malý auditní log herních událostí (viz zadání "Logování hráčské
+// aktivity") — VÝHRADNĚ login/game_started/night_survived/player_died,
+// žádná obecná telemetrie/metadata_json/IP/user-agent (viz report).
+// Append-only — žádný update/delete cesta v service vrstvě.
+model NocniHlidacPlayerActivityEvent {
+  id           String            @id @default(cuid())
+  playerId     String
+  player       NocniHlidacPlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  eventType    String
+  nightNumber  Int?
+  gameMode     String?
+  client       String?           @db.VarChar(32)
+  buildVersion String?           @db.VarChar(64)
+  createdAt    DateTime          @default(now())
+
+  @@index([playerId])
+  @@index([createdAt(sort: Desc)])
+  @@index([playerId, createdAt(sort: Desc)])
 }
 
 // Noční hlídač / Objekt 13 — serverový Hardcore-only profil (samostatný z

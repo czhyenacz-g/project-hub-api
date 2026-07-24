@@ -50,9 +50,12 @@ Odpověď (200):
 
 ### POST /nocni-hlidac/player/upsert
 
-Volá se po úspěšném Discord loginu (nocni-hlidac `app/api/auth/callback/route.ts`).
-Založí hráče, pokud ještě neexistuje (s `bestRun: 0, currentRun: 0`), jinak aktualizuje jen
-`username`/`displayName`/`avatarUrl`/`lastLoginAt` — **nikdy nepřepíše `bestRun`/`currentRun`**.
+Volá se po úspěšném Discord loginu (nocni-hlidac `app/api/auth/callback/route.ts`), ale
+také z `app/api/auth/me/route.ts` (self-healing kontrola existující session) — proto
+NIKDY neaktualizuje `lastLoginAt` (viz níže u `/player/login`). Založí hráče, pokud ještě
+neexistuje (s `bestRun: 0, currentRun: 0`), jinak aktualizuje jen
+`username`/`displayName`/`avatarUrl` — **nikdy nepřepíše `bestRun`/`currentRun` ani
+`lastLoginAt`**.
 
 ```bash
 curl -X POST https://api.example.com/nocni-hlidac/player/upsert \
@@ -666,6 +669,79 @@ Testovací `discordUserId` používají rezervované číselné bloky (`90000000
 `playerProfileEquipmentRoutes.test.ts` — oddělené bloky, ať souběžný test-run všech souborů
 nekoliduje), čistí se po sobě v `afterEach`. Celý `nocni-hlidac` modul: 244 testů, všechny
 zelené.
+
+## Logování hráčské aktivity a `/admin` overview
+
+Malé rozšíření `NocniHlidacPlayer` (poslední přihlášení/hraní hráče) + jednoduchý auditní
+log (`NocniHlidacPlayerActivityEvent`) + dva read-only endpointy pro nocni-hlidac's
+server-rendered `/admin` (viz nocni-hlidac `lib/admin/adminOverview.ts`, `app/admin/page.tsx`
+— admin identita se ověřuje VÝHRADNĚ na nocni-hlidac straně přes jeho existující
+`lib/auth/adminUsers.ts`, tenhle hub nemá a nepotřebuje žádný koncept "kdo je admin").
+
+### DB změny
+
+- `NocniHlidacPlayer` — přidána nullable pole `lastPlayedAt`, `lastActivityAt`,
+  `lastClient` (`VARCHAR(32)`), `lastBuildVersion` (`VARCHAR(64)`) + index na
+  `lastActivityAt DESC`. Existující `lastLoginAt` se ZNOVUPOUŽÍVÁ (žádný duplicitní
+  sloupec) a je od opravy popsané níže aktualizované VÝHRADNĚ přes
+  `POST /nocni-hlidac/player/login` — `upsertNocniHlidacPlayer` (`/player/upsert`, volané i
+  z nocni-hlidac's `/api/auth/me` self-healing kontroly) na `lastLoginAt` nikdy nesahá, takže
+  u nově vytvořeného hráče zůstává `null`, dokud nenaběhne navazující `/player/login` volání
+  ze skutečného OAuth callbacku.
+- Nová tabulka `NocniHlidacPlayerActivityEvent` (`playerId` FK → `NocniHlidacPlayer`,
+  `onDelete: Cascade`; `eventType`, volitelné `nightNumber`/`gameMode`/`client`/
+  `buildVersion`; `createdAt`) — jen čtyři typy: `login`/`game_started`/`night_survived`/
+  `player_died`. Žádné `metadata`/IP/user-agent. Indexy: `playerId`, `createdAt DESC`,
+  složený `(playerId, createdAt DESC)`.
+- Migrace: `prisma/migrations/20260724120000_add_nocni_hlidac_activity/` — RUČNĚ
+  napsaná (ne vygenerovaná přes `prisma migrate dev`), protože lokální dev DB měla už
+  PŘED touhle změnou nesourodý stav vůči migration historii (16 starších migrací
+  evidovaných jako "neaplikované", ačkoliv fyzické tabulky už jim odpovídaly — Prisma by
+  chtělo celou dev DB resetovat, což je zakázané, viz
+  `docs/operations/prisma-migration-reconciliation.md`). SQL byl aplikován ručně přes
+  `docker exec project-hub-postgres psql ...` (čistě `ADD COLUMN`/`CREATE TABLE`,
+  žádný `DROP`), stejný bezpečný postup jako v reconciliačním dokumentu. Na produkci
+  aplikovat přes `prisma migrate deploy` (viz "Nasazení" níže) — tam by měla migration
+  historie být čistá.
+
+### Nové/rozšířené endpointy (`src/modules/nocniHlidac/`)
+
+- **`POST /nocni-hlidac/player/login`** (`activityRoutes.ts`) — `{ discordUserId }`.
+  Volá VÝHRADNĚ nocni-hlidac's OAuth callback po skutečně dokončeném loginu. Aktualizuje
+  `lastLoginAt`/`lastActivityAt`, zapíše `login` event — v JEDNÉ transakci
+  (`activityService.ts#recordLogin`). 404, pokud hráč ještě neexistuje (upsert musí proběhnout
+  první). Odpověď: `{ ok: true }` (nocni-hlidac čte jen `.ok`).
+- **`POST /nocni-hlidac/player/activity/game-start`** (`activityRoutes.ts`) —
+  `{ discordUserId, client?, buildVersion? }`. `client` mimo `web`/`itch`/`local-export` se
+  tiše normalizuje na `"unknown"` (nikdy 400), `buildVersion` se ořízne na 64 znaků.
+  Aktualizuje `lastPlayedAt`/`lastActivityAt`/`lastClient`/`lastBuildVersion`, zapíše
+  `game_started` event — jedna transakce (`activityService.ts#recordGameStart`). Odpověď:
+  FLAT `PlayerActivitySummary` objekt (bez wrapperu).
+- **`POST /nocni-hlidac/player/survive-night`** a **`.../death`** (`routes.ts`, rozšířeno) —
+  tělo navíc přijímá volitelné `nightNumber` (validation.ts). Po úspěšné run-transition
+  (`applySurviveNight`/`currentRun: 0`, beze změny) SE VE STEJNÉ TRANSAKCI navíc zapíše
+  `night_survived`/`player_died` event (`gameMode` VŽDY `"hardcore"` — nocni-hlidac tenhle
+  hub volá jen pro Hardcore, `gameMode` se v těle nikdy neposílá, viz "Nesoulad kontraktu"
+  v reportu) a `client`/`buildVersion` na eventu se přebírají z hráčova AKTUÁLNÍHO
+  `lastClient`/`lastBuildVersion`, ne z requestu. Neúspěch (hráč nenalezen) → žádný event.
+- **`GET /nocni-hlidac/admin/players?limit=100`** a
+  **`GET /nocni-hlidac/admin/activity-events?limit=100`** (`adminOverviewRoutes.ts`,
+  `adminOverviewService.ts`) — read-only, stejná `nocniHlidacAuth` autorizace jako
+  všechno ostatní. Vrací FLAT pole (ne `{summary, players, events}` — nocni-hlidac's
+  `/admin` stránka si "Celkem hráčů"/"Hráli za 24h"/"poslední aktivitu" počítá sama z pole
+  hráčů). `players` seřazeno `lastActivityAt DESC NULLS LAST`, `hardcoreBestNight` dotažené
+  jedním extra dotazem (join přes `discordUserId`, ne per-řádek). `activity-events`
+  seřazeno `createdAt DESC`, `discordUserId`/`displayName`/`username` denormalizované přes
+  Prisma `include` (jeden JOIN, ne N+1).
+
+### Testy
+
+`activityValidation` logika nemá vlastní test soubor (čistá funkce, pokrytá nepřímo přes
+route testy) — `activityRoutes.test.ts` (10 testů), rozšíření `routes.test.ts` o
+night_survived/player_died event testy, `adminOverviewRoutes.test.ts` (8 testů). Testovací
+`discordUserId` prefix `test-activity-discord-` (NE `test-discord-` — ten už používá
+`routes.test.ts` a shoduje se jako prefix, což při souběžném běhu testovacích souborů
+způsobovalo mazání cizích řádků, viz report).
 
 ## Plánovaný další krok
 

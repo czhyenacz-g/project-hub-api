@@ -106,6 +106,85 @@ describe('POST /nocni-hlidac/player/upsert', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: 'invalid_request' });
   });
+
+  // "lastLoginAt má znamenat skutečné dokončení Discord OAuth loginu" — viz
+  // activityService.ts#recordLogin komentář. Upsert (volané i z nocni-hlidac's
+  // /api/auth/me self-healing check, ne jen ze skutečného loginu) proto
+  // `lastLoginAt` NIKDY nenastavuje/nemění, ani nezapisuje žádný activity event.
+  it('leaves lastLoginAt null on first creation (no real login has happened yet)', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-8', username: 'freshguard' },
+    });
+
+    const player = await db.nocniHlidacPlayer.findUnique({ where: { discordUserId: 'test-discord-8' } });
+    expect(player?.lastLoginAt).toBeNull();
+  });
+
+  it('does not change lastLoginAt on an existing player, even across repeated calls (simulating repeated /api/auth/me checks)', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-9', username: 'repeatguard' },
+    });
+    const realLoginAt = new Date('2026-01-01T00:00:00.000Z');
+    await db.nocniHlidacPlayer.update({ where: { discordUserId: 'test-discord-9' }, data: { lastLoginAt: realLoginAt } });
+
+    // Simulate several subsequent /api/auth/me session checks, each of which
+    // calls this same upsert on the nocni-hlidac side.
+    for (let i = 0; i < 3; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/nocni-hlidac/player/upsert',
+        headers: authHeaders,
+        payload: { discordUserId: 'test-discord-9', username: 'repeatguard' },
+      });
+    }
+
+    const player = await db.nocniHlidacPlayer.findUnique({ where: { discordUserId: 'test-discord-9' } });
+    expect(player?.lastLoginAt?.toISOString()).toBe(realLoginAt.toISOString());
+  });
+
+  it('creates no activity event as a side effect of upsert', async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-10', username: 'quietguard' },
+    });
+    const player = await db.nocniHlidacPlayer.findUnique({ where: { discordUserId: 'test-discord-10' } });
+    const events = await db.nocniHlidacPlayerActivityEvent.findMany({ where: { playerId: player!.id } });
+    expect(events).toHaveLength(0);
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('still updates username/displayName/avatarUrl on an existing player (unaffected by the lastLoginAt change)', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-11', username: 'before', displayName: 'Before', avatarUrl: 'https://example.com/before.png' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-11', username: 'after', displayName: 'After', avatarUrl: 'https://example.com/after.png' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ guardName: 'After', bestRun: 0, currentRun: 0 });
+
+    const player = await db.nocniHlidacPlayer.findUnique({ where: { discordUserId: 'test-discord-11' } });
+    expect(player).toMatchObject({ username: 'after', displayName: 'After', avatarUrl: 'https://example.com/after.png' });
+  });
 });
 
 describe('POST /nocni-hlidac/player/survive-night', () => {
@@ -169,6 +248,53 @@ describe('POST /nocni-hlidac/player/survive-night', () => {
     // currentRun 2 -> 3, still below bestRun 9.
     expect(res.json()).toEqual({ guardName: 'veteran', bestRun: 9, currentRun: 3 });
   });
+
+  it('creates a night_survived activity event with nightNumber, gameMode "hardcore", and the player\'s last known client/build', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-6', username: 'nighty' },
+    });
+    const player = await db.nocniHlidacPlayer.update({
+      where: { discordUserId: 'test-discord-6' },
+      data: { lastClient: 'itch', lastBuildVersion: 'build-42' },
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/survive-night',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-6', nightNumber: 5 },
+    });
+
+    const events = await db.nocniHlidacPlayerActivityEvent.findMany({ where: { playerId: player.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      eventType: 'night_survived',
+      nightNumber: 5,
+      gameMode: 'hardcore',
+      client: 'itch',
+      buildVersion: 'build-42',
+    });
+
+    const updated = await db.nocniHlidacPlayer.findUnique({ where: { discordUserId: 'test-discord-6' } });
+    expect(updated?.lastPlayedAt).not.toBeNull();
+    expect(updated?.lastActivityAt).not.toBeNull();
+  });
+
+  it('creates no activity event when the operation fails (player not found)', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/survive-night',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-never-existed' },
+    });
+    const events = await db.nocniHlidacPlayerActivityEvent.count({ where: { player: { discordUserId: { startsWith: 'test-discord-' } } } });
+    expect(events).toBe(0);
+  });
 });
 
 describe('POST /nocni-hlidac/player/death', () => {
@@ -203,6 +329,49 @@ describe('POST /nocni-hlidac/player/death', () => {
       payload: { discordUserId: 'test-discord-5' },
     });
     expect(res.json()).toEqual({ guardName: 'doomed', bestRun: 6, currentRun: 0 });
+  });
+
+  it('creates a player_died activity event with nightNumber and the player\'s last known client/build', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/upsert',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-7', username: 'unlucky' },
+    });
+    const player = await db.nocniHlidacPlayer.update({
+      where: { discordUserId: 'test-discord-7' },
+      data: { lastClient: 'web', lastBuildVersion: 'build-7' },
+    });
+
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/death',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-7', nightNumber: 3 },
+    });
+
+    const events = await db.nocniHlidacPlayerActivityEvent.findMany({ where: { playerId: player.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      eventType: 'player_died',
+      nightNumber: 3,
+      gameMode: 'hardcore',
+      client: 'web',
+      buildVersion: 'build-7',
+    });
+  });
+
+  it('creates no activity event when the operation fails (player not found)', async () => {
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/nocni-hlidac/player/death',
+      headers: authHeaders,
+      payload: { discordUserId: 'test-discord-never-existed' },
+    });
+    const events = await db.nocniHlidacPlayerActivityEvent.count({ where: { player: { discordUserId: { startsWith: 'test-discord-' } } } });
+    expect(events).toBe(0);
   });
 });
 

@@ -35,7 +35,7 @@ export async function nocniHlidacRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) return sendError(reply, 400, 'invalid_request');
 
       try {
-        const player = await recordSurvivedNight(parsed.data.discordUserId);
+        const player = await recordSurvivedNight(parsed.data.discordUserId, parsed.data.nightNumber);
         if (!player) return sendError(reply, 404, 'player_not_found');
         return reply.status(200).send(player);
       } catch (err) {
@@ -53,7 +53,7 @@ export async function nocniHlidacRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) return sendError(reply, 400, 'invalid_request');
 
       try {
-        const player = await recordDeath(parsed.data.discordUserId);
+        const player = await recordDeath(parsed.data.discordUserId, parsed.data.nightNumber);
         if (!player) return sendError(reply, 404, 'player_not_found');
         return reply.status(200).send(player);
       } catch (err) {
