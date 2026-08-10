@@ -3,6 +3,7 @@ import { db } from '../../db.js';
 import { CreateTournamentInput } from './tournamentValidation.js';
 import { generateTournamentMatches } from './tournamentMatchGenerator.js';
 import { createGame } from './onlineGames.js';
+import { calculateTournamentStandings } from './tournamentStandings.js';
 
 export type TournamentFormat = 'derby' | 'league_top2_final' | 'league_top4_playoff';
 
@@ -391,5 +392,8 @@ export function serializeTournament(tournament: TournamentWithTeams) {
       finalRank: team.finalRank,
     })),
     matches: tournament.matches.map(serializeTournamentMatch),
+    // Always all teams, even with zero matches played (all-zero rows) — see
+    // calculateTournamentStandings' doc comment.
+    standings: calculateTournamentStandings(tournament.teams, tournament.matches),
   };
 }

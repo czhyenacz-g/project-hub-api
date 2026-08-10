@@ -1,5 +1,6 @@
 import { TournamentMatch } from '@prisma/client';
 import { db } from '../../db.js';
+import { checkAndFinishTournament } from './tournamentCompletionService.js';
 
 // Deliberately its own file (not tournamentService.ts) so onlineGames.ts can
 // import it without a circular dependency — tournamentService.ts already
@@ -78,6 +79,12 @@ function sameResult(
  * safe no-op that returns the existing match. A repeat finish with a
  * DIFFERENT score never overwrites the stored result — it's logged and
  * returned as a conflict instead.
+ *
+ * Whenever this match ends up confirmed 'finished' (freshly, or on an
+ * idempotent repeat), it also calls checkAndFinishTournament() — see
+ * tournamentCompletionService.ts — so the whole tournament (not just this
+ * one match) gets marked finished + gets its winner as soon as every
+ * generated match is done, without needing a separate cron/poll.
  */
 export async function finishTournamentMatchFromOnlineGame(
   params: FinishTournamentMatchFromOnlineGameParams,
@@ -106,6 +113,10 @@ export async function finishTournamentMatchFromOnlineGame(
 
   if (match.status === 'finished') {
     if (sameResult(match, homeScore, awayScore, winnerTeamId)) {
+      // Idempotent — a no-op if the tournament is already finished too, but
+      // still worth re-checking in case an earlier finish call recorded this
+      // match's result while the tournament-level check hadn't run yet.
+      await checkAndFinishTournament(match.tournamentId);
       return { outcome: 'already_finished_same_result', match };
     }
     console.error(
@@ -131,10 +142,14 @@ export async function finishTournamentMatchFromOnlineGame(
   if (updateResult.count === 0) {
     // Lost the race — another concurrent call already finished this match.
     if (sameResult(refreshed, homeScore, awayScore, winnerTeamId)) {
+      await checkAndFinishTournament(match.tournamentId);
       return { outcome: 'already_finished_same_result', match: refreshed };
     }
     return { outcome: 'conflict', match: refreshed };
   }
 
+  // This match just became finished — see if that was the last one the
+  // tournament was waiting on.
+  await checkAndFinishTournament(match.tournamentId);
   return { outcome: 'finished', match: refreshed };
 }
