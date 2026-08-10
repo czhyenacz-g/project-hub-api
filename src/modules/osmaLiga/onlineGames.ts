@@ -5,6 +5,7 @@ import { computeTrainingChallengeInput } from '../../gameEngine/ai.js';
 import { MATCH_DURATION } from '../../gameEngine/constants.js';
 import { DEFAULT_BEHAVIOR_CONFIG, TRAINING_CHALLENGE_BEHAVIOR_CONFIG } from '../../gameEngine/teamBehavior.js';
 import { saveOnlineMatchResult } from './onlineMatchResultService.js';
+import { finishTournamentMatchFromOnlineGame } from './tournamentMatchResultService.js';
 
 export const ONLINE_GAME_TTL_MINUTES = 30;
 export const LOOKING_FOR_OPPONENT_TTL_MINUTES = 10;
@@ -404,6 +405,21 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
       void saveOnlineMatchResult(room).catch((e: unknown) => {
         console.error('[onlineGames] Failed to save online match result:', e);
       });
+      // Tournament linkage — see tournamentService.ts#playTournamentMatch,
+      // which sets tournamentMatchId only for rooms created from a
+      // TournamentMatch. A no-op for every other room (regular lobby,
+      // training challenge).
+      if (room.tournamentMatchId) {
+        void finishTournamentMatchFromOnlineGame({
+          onlineMatchId: room.code,
+          homeUserId: room.homeUserId,
+          awayUserId: room.awayUserId,
+          homeScore: room.gameState.score.home,
+          awayScore: room.gameState.score.away,
+        }).catch((e: unknown) => {
+          console.error('[onlineGames] Failed to finish tournament match:', e);
+        });
+      }
     }
   }, TICK_MS);
 
