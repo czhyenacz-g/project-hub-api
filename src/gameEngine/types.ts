@@ -1,3 +1,5 @@
+import { PlayerStats } from './playerStats.js';
+
 export interface Vec2 { x: number; y: number; }
 
 // Mirrors osma-liga/game/types.ts PlayerRole.
@@ -16,6 +18,9 @@ export interface OnlinePlayer {
   kickCooldown: number;
   active: boolean;
   role: PlayerRole;
+  // Parametric capability profile — see playerStats.ts. Each player owns its
+  // own copy (createInitialState.ts clones the defaults).
+  stats: PlayerStats;
 }
 
 export interface OnlineBall {

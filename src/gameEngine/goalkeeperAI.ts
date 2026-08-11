@@ -1,7 +1,7 @@
 import { OnlineBall, OnlineGameState, OnlinePlayer } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_CY,
-  GOALKEEPER_ZONE_DEPTH, GOALKEEPER_ZONE_HEIGHT, GOALKEEPER_SPEED,
+  GOALKEEPER_ZONE_DEPTH, GOALKEEPER_ZONE_HEIGHT,
   GOALKEEPER_DEFAULT_DEPTH, GOALKEEPER_REACT_RANGE,
 } from './constants.js';
 
@@ -46,13 +46,13 @@ function updateGoalkeeper(gk: OnlinePlayer, ball: OnlineBall, dt: number): void 
   const distToTarget = Math.hypot(dx, dy);
 
   if (distToTarget > 1) {
-    const step = Math.min(distToTarget, GOALKEEPER_SPEED * dt);
+    const step = Math.min(distToTarget, gk.stats.speed * dt);
     const nx = dx / distToTarget;
     const ny = dy / distToTarget;
     gk.x += nx * step;
     gk.y += ny * step;
-    gk.vx = nx * GOALKEEPER_SPEED;
-    gk.vy = ny * GOALKEEPER_SPEED;
+    gk.vx = nx * gk.stats.speed;
+    gk.vy = ny * gk.stats.speed;
   } else {
     gk.vx = 0;
     gk.vy = 0;

@@ -1,7 +1,7 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
-  PLAYER_SPEED, KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
+  KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
   KICK_TAP_FORCE_MULTIPLIER, KICK_MAX_CHARGE_FORCE_MULTIPLIER, KICK_MAX_CHARGE_MS,
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
   AUTO_PLAYER_SWITCH_COOLDOWN_MS, AUTO_SWITCH_INPUT_LOCK_MS,
@@ -116,8 +116,8 @@ function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number):
   if (len > 0) {
     dx /= len;
     dy /= len;
-    player.x += dx * PLAYER_SPEED * dt;
-    player.y += dy * PLAYER_SPEED * dt;
+    player.x += dx * player.stats.speed * dt;
+    player.y += dy * player.stats.speed * dt;
   }
 }
 
@@ -460,8 +460,8 @@ export function tickGame(
               if (bcDist < BALL_RETENTION_RADIUS && ballSpeed < BALL_RETENTION_MAX_BALL_SPEED) {
                 const oppDist = nearestOpponentDistance(state, state.ball.x, state.ball.y, team, removedIds);
                 if (oppDist > BALL_RETENTION_NO_OPPONENT_RADIUS) {
-                  const playerVx = hasInput ? tNorm.x * PLAYER_SPEED : 0;
-                  const playerVy = hasInput ? tNorm.y * PLAYER_SPEED : 0;
+                  const playerVx = hasInput ? tNorm.x * p.stats.speed : 0;
+                  const playerVy = hasInput ? tNorm.y * p.stats.speed : 0;
                   state.ball.vx += (playerVx - state.ball.vx) * BALL_RETENTION_STRENGTH;
                   state.ball.vy += (playerVy - state.ball.vy) * BALL_RETENTION_STRENGTH;
                   if (!hasInput) {
@@ -508,8 +508,8 @@ export function tickGame(
                   forceMultiplier *= KICK_CONTACT_FORCE_MULTIPLIER;
                 }
 
-                state.ball.vx += norm.x * KICK_FORCE * forceMultiplier;
-                state.ball.vy += norm.y * KICK_FORCE * forceMultiplier;
+                state.ball.vx += norm.x * KICK_FORCE * forceMultiplier * p.stats.shotPower;
+                state.ball.vy += norm.y * KICK_FORCE * forceMultiplier * p.stats.shotPower;
                 p.kickCooldown = KICK_COOLDOWN;
               }
             }
@@ -521,8 +521,8 @@ export function tickGame(
           if (d <= KICK_RANGE) {
             const norm = computeKickDirection(input, team);
             snapBallInFrontOfKicker(state.ball, p.x, p.y, norm.x, norm.y);
-            state.ball.vx += norm.x * KICK_FORCE;
-            state.ball.vy += norm.y * KICK_FORCE;
+            state.ball.vx += norm.x * KICK_FORCE * p.stats.shotPower;
+            state.ball.vy += norm.y * KICK_FORCE * p.stats.shotPower;
             p.kickCooldown = KICK_COOLDOWN;
           }
         }
@@ -547,7 +547,7 @@ export function tickGame(
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (d <= KICK_RANGE) {
             const dir = team === 'home' ? 1 : -1;
-            state.ball.vx += dir * SUPPORT_KICK_FORCE;
+            state.ball.vx += dir * SUPPORT_KICK_FORCE * p.stats.shotPower;
             state.ball.vy += (Math.random() - 0.5) * 60;
             p.kickCooldown = KICK_COOLDOWN;
           }

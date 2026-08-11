@@ -87,18 +87,17 @@ export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: Onlin
       ball.x += nx * overlap;
       ball.y += ny * overlap;
 
-      // Goalkeepers are a much stronger obstacle than a field player — heavy
-      // damping kills most of the incoming speed instead of just bumping it,
-      // while staying beatable (mirrors osma-liga/game/physics.ts).
-      if (p.role === 'goalkeeper') {
-        ball.vx *= GOALKEEPER_BALL_DAMPING;
-        ball.vy *= GOALKEEPER_BALL_DAMPING;
-        ball.vx += nx * GOALKEEPER_BUMP_FORCE;
-        ball.vy += ny * GOALKEEPER_BUMP_FORCE;
-      } else {
-        ball.vx += nx * BUMP_FORCE;
-        ball.vy += ny * BUMP_FORCE;
-      }
+      // Stopping power: linearly interpolates/extrapolates between the
+      // field-player baseline (stoppingPower 0 — no damping, standard
+      // BUMP_FORCE) and the goalkeeper baseline (stoppingPower 1 — heavy
+      // damping, reduced bump) from playerStats.ts's default profiles.
+      // Mirrors osma-liga/game/physics.ts.
+      const damping = 1 - p.stats.stoppingPower * (1 - GOALKEEPER_BALL_DAMPING);
+      const bump = BUMP_FORCE + p.stats.stoppingPower * (GOALKEEPER_BUMP_FORCE - BUMP_FORCE);
+      ball.vx *= damping;
+      ball.vy *= damping;
+      ball.vx += nx * bump;
+      ball.vy += ny * bump;
 
       touched = p.id;
     }

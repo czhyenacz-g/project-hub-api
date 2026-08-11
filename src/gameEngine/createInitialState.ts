@@ -1,6 +1,7 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import { FIELD_CX, FIELD_CY, FIELD_L, FIELD_R, GOALKEEPER_DEFAULT_DEPTH, MATCH_DURATION } from './constants.js';
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG, TemporaryRemovalConfig, pickRandomTriggerSecond } from './temporaryRemoval.js';
+import { DEFAULT_FIELD_PLAYER_STATS, DEFAULT_GOALKEEPER_STATS } from './playerStats.js';
 
 function makeInput(): InputState {
   return { up: false, down: false, left: false, right: false, kick: false, switchPlayer: false };
@@ -13,7 +14,11 @@ function makePlayer(
   y: number,
   label: string,
 ): OnlinePlayer {
-  return { id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false, role: 'field_player' };
+  return {
+    id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false,
+    role: 'field_player',
+    stats: { ...DEFAULT_FIELD_PLAYER_STATS },
+  };
 }
 
 function makeGoalkeeper(
@@ -23,7 +28,11 @@ function makeGoalkeeper(
   label: string,
 ): OnlinePlayer {
   const x = team === 'home' ? FIELD_L + GOALKEEPER_DEFAULT_DEPTH : FIELD_R - GOALKEEPER_DEFAULT_DEPTH;
-  return { id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false, role: 'goalkeeper' };
+  return {
+    id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false,
+    role: 'goalkeeper',
+    stats: { ...DEFAULT_GOALKEEPER_STATS },
+  };
 }
 
 export function createInitialState(

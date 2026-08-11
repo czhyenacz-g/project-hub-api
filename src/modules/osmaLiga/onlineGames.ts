@@ -426,7 +426,10 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
   return true;
 }
 
-function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
+// Exported so tests can assert on the wire shape directly (pure function of
+// its arguments — no timers/sockets/side effects) without spinning up a full
+// room + socket loop.
+export function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
   const removedIds = new Set(state.temporaryRemovals.map((r) => r.playerId));
   return {
     tick: state.tick,
@@ -443,6 +446,9 @@ function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
       label: p.label,
       removed: removedIds.has(p.id),
       isGoalkeeper: p.role === 'goalkeeper',
+      // Visual size only (stats.speed/shotPower/stoppingPower are
+      // server-only physics concerns the client never needs).
+      size: p.stats.size,
     })),
     goalMessage: state.goalMessage,
     isOwnGoal: state.isOwnGoal,
