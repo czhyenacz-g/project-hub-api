@@ -6,6 +6,7 @@ import {
   BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION, KICK_SNAP_CLEARANCE,
   TEAMMATE_SEPARATION_RADIUS, TEAMMATE_SEPARATION_STRENGTH,
   TEAMMATE_BALL_RECEIVE_MAX_SPEED, TEAMMATE_BALL_RECEIVE_EXTRA_RADIUS,
+  GOALKEEPER_BALL_DAMPING, GOALKEEPER_BUMP_FORCE,
 } from './constants.js';
 
 export function dist(ax: number, ay: number, bx: number, by: number): number {
@@ -86,9 +87,18 @@ export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: Onlin
       ball.x += nx * overlap;
       ball.y += ny * overlap;
 
-      // Apply bump force
-      ball.vx += nx * BUMP_FORCE;
-      ball.vy += ny * BUMP_FORCE;
+      // Goalkeepers are a much stronger obstacle than a field player — heavy
+      // damping kills most of the incoming speed instead of just bumping it,
+      // while staying beatable (mirrors osma-liga/game/physics.ts).
+      if (p.role === 'goalkeeper') {
+        ball.vx *= GOALKEEPER_BALL_DAMPING;
+        ball.vy *= GOALKEEPER_BALL_DAMPING;
+        ball.vx += nx * GOALKEEPER_BUMP_FORCE;
+        ball.vy += ny * GOALKEEPER_BUMP_FORCE;
+      } else {
+        ball.vx += nx * BUMP_FORCE;
+        ball.vy += ny * BUMP_FORCE;
+      }
 
       touched = p.id;
     }

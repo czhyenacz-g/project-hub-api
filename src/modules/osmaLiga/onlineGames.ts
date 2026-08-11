@@ -442,6 +442,7 @@ function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
       active: p.active,
       label: p.label,
       removed: removedIds.has(p.id),
+      isGoalkeeper: p.role === 'goalkeeper',
     })),
     goalMessage: state.goalMessage,
     isOwnGoal: state.isOwnGoal,

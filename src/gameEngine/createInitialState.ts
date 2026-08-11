@@ -1,5 +1,5 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
-import { FIELD_CX, FIELD_CY, MATCH_DURATION } from './constants.js';
+import { FIELD_CX, FIELD_CY, FIELD_L, FIELD_R, GOALKEEPER_DEFAULT_DEPTH, MATCH_DURATION } from './constants.js';
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG, TemporaryRemovalConfig, pickRandomTriggerSecond } from './temporaryRemoval.js';
 
 function makeInput(): InputState {
@@ -13,7 +13,17 @@ function makePlayer(
   y: number,
   label: string,
 ): OnlinePlayer {
-  return { id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false };
+  return { id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false, role: 'field_player' };
+}
+
+function makeGoalkeeper(
+  id: string,
+  team: 'home' | 'away',
+  y: number,
+  label: string,
+): OnlinePlayer {
+  const x = team === 'home' ? FIELD_L + GOALKEEPER_DEFAULT_DEPTH : FIELD_R - GOALKEEPER_DEFAULT_DEPTH;
+  return { id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false, role: 'goalkeeper' };
 }
 
 export function createInitialState(
@@ -28,6 +38,9 @@ export function createInitialState(
     makePlayer('a1', 'away', 760, 180, 'A1'),
     makePlayer('a2', 'away', 760, FIELD_CY, 'A2'),
     makePlayer('a3', 'away', 760, 380, 'A3'),
+    // Goalkeepers — one per team, not counted among the 3 field players.
+    makeGoalkeeper('h-gk', 'home', FIELD_CY, 'GK'),
+    makeGoalkeeper('a-gk', 'away', FIELD_CY, 'GK'),
   ];
 
   return {

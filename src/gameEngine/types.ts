@@ -1,5 +1,8 @@
 export interface Vec2 { x: number; y: number; }
 
+// Mirrors osma-liga/game/types.ts PlayerRole.
+export type PlayerRole = 'field_player' | 'goalkeeper';
+
 export interface OnlinePlayer {
   id: string;
   team: 'home' | 'away';
@@ -12,6 +15,7 @@ export interface OnlinePlayer {
   label: string;
   kickCooldown: number;
   active: boolean;
+  role: PlayerRole;
 }
 
 export interface OnlineBall {
