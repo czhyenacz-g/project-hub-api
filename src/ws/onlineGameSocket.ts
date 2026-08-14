@@ -106,6 +106,13 @@ export function attachSocketIO(httpServer: http.Server): IOServer {
         socket.emit('error', { message: 'Bench deploy rejected' });
       }
     });
+
+    // Debug-only RTT probe (see docs/network/realtime-architecture-audit.md).
+    // Stateless echo — does not touch room/game state, safe pre- or mid-match.
+    socket.on('debug_ping', (clientTimestamp: number) => {
+      if (typeof clientTimestamp !== 'number') return;
+      socket.emit('debug_pong', clientTimestamp);
+    });
   });
 
   return io;
