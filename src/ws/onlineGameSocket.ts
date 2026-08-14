@@ -1,7 +1,7 @@
 import { Server as IOServer } from 'socket.io';
 import * as http from 'http';
 import { config } from '../config.js';
-import { getGame, startGame, updateInput } from '../modules/osmaLiga/onlineGames.js';
+import { getGame, startGame, updateInput, requestBenchDeploy } from '../modules/osmaLiga/onlineGames.js';
 import { InputState } from '../gameEngine/types.js';
 
 export function attachSocketIO(httpServer: http.Server): IOServer {
@@ -96,6 +96,15 @@ export function attachSocketIO(httpServer: http.Server): IOServer {
         switchPlayer: !!inputData.switchPlayer,
       };
       updateInput(roomCode, playerTeam, clean);
+    });
+
+    socket.on('deploy_bench_player', ({ playerId }: { playerId: string }) => {
+      if (!roomCode || !playerTeam) return;
+      if (typeof playerId !== 'string') return;
+      const ok = requestBenchDeploy(roomCode, playerTeam, playerId);
+      if (!ok) {
+        socket.emit('error', { message: 'Bench deploy rejected' });
+      }
     });
   });
 

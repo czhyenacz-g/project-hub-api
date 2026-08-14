@@ -3,6 +3,7 @@ import { createInitialState } from '../../gameEngine/createInitialState.js';
 import { tickGame } from '../../gameEngine/tick.js';
 import { computeTrainingChallengeInput } from '../../gameEngine/ai.js';
 import { MATCH_DURATION } from '../../gameEngine/constants.js';
+import { canDeployFromBench, deployBenchPlayer } from '../../gameEngine/benchDeployment.js';
 import { DEFAULT_BEHAVIOR_CONFIG, TRAINING_CHALLENGE_BEHAVIOR_CONFIG } from '../../gameEngine/teamBehavior.js';
 import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 import { finishTournamentMatchFromOnlineGame } from './tournamentMatchResultService.js';
@@ -347,6 +348,20 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
     // side with a simple ball-chasing AI instead of leaving it static.
     if (room.isTrainingChallenge) {
       room.gameState.inputs.home = computeTrainingChallengeInput(room.gameState);
+
+      // No real client drives the training-challenge home side, so there's
+      // no socket command to trigger a bench deploy — the bot deploys its
+      // one bench player directly once the match is past its halfway point.
+      // Deterministic, one-shot: canDeployFromBench's benchUsed check
+      // guarantees this only ever fires once per bench player.
+      if (room.gameState.timeLeftSeconds < MATCH_DURATION / 2) {
+        const benchPlayer = room.gameState.players.find(
+          (p) => p.team === 'home' && canDeployFromBench(p),
+        );
+        if (benchPlayer) {
+          deployBenchPlayer(room.gameState, 'home', benchPlayer.id);
+        }
+      }
     }
 
     const prevHome = room.gameState.score.home;
@@ -431,6 +446,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
 // room + socket loop.
 export function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): object {
   const removedIds = new Set(state.temporaryRemovals.map((r) => r.playerId));
+  const benchRemainingById = new Map(state.benchDeployments.map((d) => [d.playerId, d.remainingMs]));
   return {
     tick: state.tick,
     status: state.status,
@@ -449,6 +465,10 @@ export function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): obj
       // Visual size only (stats.speed/shotPower/stoppingPower are
       // server-only physics concerns the client never needs).
       size: p.stats.size,
+      // Bench + temporary substitute — see benchDeployment.ts.
+      matchStatus: p.matchStatus,
+      benchUsed: p.benchUsed,
+      benchRemainingMs: benchRemainingById.get(p.id) ?? null,
     })),
     goalMessage: state.goalMessage,
     isOwnGoal: state.isOwnGoal,
@@ -466,4 +486,20 @@ export function updateInput(code: string, team: 'home' | 'guest', input: InputSt
   } else {
     room.gameState.inputs.guest = input;
   }
+}
+
+// Server-authoritative bench deploy command — mirrors updateInput's shape.
+// `connectionTeam` is the connection role ('home'/'guest') derived once at
+// join time in onlineGameSocket.ts from the caller's token (never
+// client-supplied), same mapping as updateInput: connection role 'home' ->
+// engine team 'home', connection role 'guest' -> engine team 'away'.
+// deployBenchPlayer() itself already requires `player.team === team`, so a
+// malicious client passing another team's player id simply fails the lookup
+// (not found -> false) — no redundant ownership check needed here.
+export function requestBenchDeploy(code: string, connectionTeam: 'home' | 'guest', playerId: string): boolean {
+  const room = store.get(code);
+  if (!room || !room.gameState) return false;
+  if (room.gameState.status !== 'playing') return false;
+  const engineTeam: 'home' | 'away' = connectionTeam === 'home' ? 'home' : 'away';
+  return deployBenchPlayer(room.gameState, engineTeam, playerId);
 }

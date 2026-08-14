@@ -1,5 +1,5 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
-import { FIELD_CX, FIELD_CY, FIELD_L, FIELD_R, GOALKEEPER_DEFAULT_DEPTH, MATCH_DURATION } from './constants.js';
+import { FIELD_CX, FIELD_CY, FIELD_L, FIELD_R, FIELD_B, GOALKEEPER_DEFAULT_DEPTH, MATCH_DURATION, DEFAULT_BENCH_SIZE } from './constants.js';
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG, TemporaryRemovalConfig, pickRandomTriggerSecond } from './temporaryRemoval.js';
 import { DEFAULT_FIELD_PLAYER_STATS, DEFAULT_GOALKEEPER_STATS } from './playerStats.js';
 
@@ -18,6 +18,8 @@ function makePlayer(
     id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false,
     role: 'field_player',
     stats: { ...DEFAULT_FIELD_PLAYER_STATS },
+    matchStatus: 'field',
+    benchUsed: false,
   };
 }
 
@@ -32,6 +34,32 @@ function makeGoalkeeper(
     id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false,
     role: 'goalkeeper',
     stats: { ...DEFAULT_GOALKEEPER_STATS },
+    matchStatus: 'field',
+    benchUsed: false,
+  };
+}
+
+// Bench player — starts off the pitch (matchStatus: 'bench'), not yet used.
+// Positioned in a holding row below the field, staggered by index so
+// DEFAULT_BENCH_SIZE > 1 doesn't stack players on top of each other.
+// baseX/baseY are set to the same spot — bench players are excluded from
+// resetPositions()'s snap-to-base after a goal (see tick.ts), so these are
+// never actually used to reposition, just kept consistent with the rest of
+// the OnlinePlayer shape.
+function makeBenchPlayer(
+  id: string,
+  team: 'home' | 'away',
+  index: number,
+  label: string,
+): OnlinePlayer {
+  const x = team === 'home' ? FIELD_L + 40 : FIELD_R - 40;
+  const y = FIELD_B + 30 + index * 36;
+  return {
+    id, team, x, y, vx: 0, vy: 0, baseX: x, baseY: y, label, kickCooldown: 0, active: false,
+    role: 'field_player',
+    stats: { ...DEFAULT_FIELD_PLAYER_STATS },
+    matchStatus: 'bench',
+    benchUsed: false,
   };
 }
 
@@ -51,6 +79,12 @@ export function createInitialState(
     makeGoalkeeper('h-gk', 'home', FIELD_CY, 'GK'),
     makeGoalkeeper('a-gk', 'away', FIELD_CY, 'GK'),
   ];
+
+  // Bench players — DEFAULT_BENCH_SIZE per team (works for 0, 1, or more).
+  for (let i = 0; i < DEFAULT_BENCH_SIZE; i++) {
+    players.push(makeBenchPlayer(`h-bench-${i}`, 'home', i, `B${i + 1}`));
+    players.push(makeBenchPlayer(`a-bench-${i}`, 'away', i, `B${i + 1}`));
+  }
 
   return {
     status: 'waiting',
@@ -82,5 +116,6 @@ export function createInitialState(
       away: pickRandomTriggerSecond(temporaryRemovalConfig),
     },
     randomSubstitutionTriggered: { home: false, away: false },
+    benchDeployments: [],
   };
 }

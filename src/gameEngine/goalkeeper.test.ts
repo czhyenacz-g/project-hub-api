@@ -23,17 +23,20 @@ function freshState(): OnlineGameState {
 }
 
 describe('goalkeeper — data model', () => {
-  it('each team has exactly one goalkeeper, not counted among the 3 field players', () => {
+  it('each team has exactly one goalkeeper, not counted among the 3 starting field players', () => {
     const state = createInitialState();
     const homeGKs = state.players.filter((p) => p.team === 'home' && p.role === 'goalkeeper');
     const awayGKs = state.players.filter((p) => p.team === 'away' && p.role === 'goalkeeper');
-    const homeFieldPlayers = state.players.filter((p) => p.team === 'home' && p.role === 'field_player');
-    const awayFieldPlayers = state.players.filter((p) => p.team === 'away' && p.role === 'field_player');
+    // 'field' matchStatus = starting field players — excludes the bench
+    // player(s) added by createInitialState (see benchDeployment.test.ts for
+    // bench-specific coverage), which also carry role 'field_player'.
+    const homeFieldPlayers = state.players.filter((p) => p.team === 'home' && p.role === 'field_player' && p.matchStatus === 'field');
+    const awayFieldPlayers = state.players.filter((p) => p.team === 'away' && p.role === 'field_player' && p.matchStatus === 'field');
     expect(homeGKs).toHaveLength(1);
     expect(awayGKs).toHaveLength(1);
     expect(homeFieldPlayers).toHaveLength(3);
     expect(awayFieldPlayers).toHaveLength(3);
-    expect(state.players).toHaveLength(8);
+    expect(state.players.length).toBeGreaterThanOrEqual(8);
   });
 
   it('goalkeepers start inside their own zone, near their own goal', () => {

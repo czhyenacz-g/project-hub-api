@@ -27,6 +27,7 @@ import {
   TemporaryRemovalConfig, DEFAULT_TEMPORARY_REMOVAL_CONFIG,
   updateTemporaryRemovals, getRemovedPlayerIds,
 } from './temporaryRemoval.js';
+import { updateBenchDeployments, isSelectableFieldPlayer, getBenchEntryPosition } from './benchDeployment.js';
 import { updateGoalkeepers } from './goalkeeperAI.js';
 import {
   PassAndSwitchConfig, DEFAULT_PASS_AND_SWITCH_CONFIG,
@@ -83,6 +84,22 @@ function resetPositions(state: OnlineGameState): void {
   const removedIds = getRemovedPlayerIds(state);
   for (const p of state.players) {
     if (removedIds.has(p.id)) continue;
+    // Benched players (unused, off the pitch) stay put too — their
+    // baseX/baseY don't represent a valid on-pitch position.
+    if (p.matchStatus === 'bench') continue;
+    if (p.matchStatus === 'temporarily_deployed') {
+      // A temporary substitute's baseX/baseY don't represent a valid
+      // on-pitch kickoff spot either — reset to its bench-entry position
+      // instead so kickoff doesn't teleport it somewhere nonsensical.
+      const entry = getBenchEntryPosition(p.team);
+      p.x = entry.x;
+      p.y = entry.y;
+      p.vx = 0;
+      p.vy = 0;
+      p.kickCooldown = 0;
+      p.active = false;
+      continue;
+    }
     p.x = p.baseX;
     p.y = p.baseY;
     p.vx = 0;
@@ -223,7 +240,7 @@ function findAutoActivePlayer(
   let nearest: OnlinePlayer | null = null;
   let nearestDist = Infinity;
   for (const p of state.players) {
-    if (p.team !== team || p.role === 'goalkeeper' || removedIds.has(p.id)) continue;
+    if (p.team !== team || !isSelectableFieldPlayer(p, removedIds)) continue;
     const d = dist(p.x, p.y, state.ball.x, state.ball.y);
     if (d < nearestDist) {
       nearestDist = d;
@@ -275,7 +292,7 @@ function resolveActivePlayer(
     state.manualLockRemaining[team] = 0;
   }
 
-  const teamPlayers = state.players.filter((p) => p.team === team && p.role !== 'goalkeeper' && !removedIds.has(p.id));
+  const teamPlayers = state.players.filter((p) => p.team === team && isSelectableFieldPlayer(p, removedIds));
   if (teamPlayers.length === 0) return null;
 
   // While this team's input holds a movement direction, they clearly intend
@@ -381,6 +398,10 @@ export function tickGame(
   // run before active-player resolution so a freshly removed player is
   // excluded from selection in the same tick it leaves.
   updateTemporaryRemovals(state, dt, temporaryRemovalConfig);
+  // Bench + temporary substitute — separate system, see benchDeployment.ts.
+  // Same ordering consideration: run before active-player resolution so a
+  // deployment that just expired is excluded from selection this tick.
+  updateBenchDeployments(state, dt);
   const removedIds = getRemovedPlayerIds(state);
 
   // 3 & 4. Move active player per team, return others to base
@@ -391,7 +412,7 @@ export function tickGame(
     const teamConfig: TeamBehaviorConfig = behaviorConfig[team];
     const supportTargets = active
       ? computeTeamSupportInputs(
-          state.players.filter((p) => p.role !== 'goalkeeper' && !removedIds.has(p.id)), team, active, state.ball, teamConfig,
+          state.players.filter((p) => isSelectableFieldPlayer(p, removedIds)), team, active, state.ball, teamConfig,
         )
       : new Map<string, { x: number; y: number }>();
 
@@ -406,6 +427,13 @@ export function tickGame(
       if (removedIds.has(p.id)) {
         // Movement while leaving/on the bench/returning is handled entirely
         // by updateTemporaryRemovals above — not eligible as active or support.
+        p.active = false;
+        continue;
+      }
+      if (p.matchStatus === 'bench') {
+        // Unused bench player, off the pitch entirely — not eligible as
+        // active or support, and not moved by this loop. See
+        // benchDeployment.ts for how it becomes 'temporarily_deployed'.
         p.active = false;
         continue;
       }
@@ -559,7 +587,7 @@ export function tickGame(
     // movement, so support teammates can't be walked into by a faster
     // active player or end up stacked on each other.
     if (active && teamConfig.teammateSupportMode !== 'none') {
-      const teammates = state.players.filter((p) => p.team === team && p.role !== 'goalkeeper' && p.id !== active.id && !removedIds.has(p.id));
+      const teammates = state.players.filter((p) => p.team === team && p.id !== active.id && isSelectableFieldPlayer(p, removedIds));
       for (const p of teammates) {
         enforceMinDistance(p, active.x, active.y, teamConfig.supportSpacing);
       }
@@ -572,7 +600,7 @@ export function tickGame(
     // Baseline same-team anti-overlap (KISS) — independent of the support
     // spacing above, so it always applies regardless of teammateSupportMode.
     // Mirrors osma-liga/game/updateGame.ts + game/ai.ts.
-    const allTeamPlayers = state.players.filter((p) => p.team === team && p.role !== 'goalkeeper' && !removedIds.has(p.id));
+    const allTeamPlayers = state.players.filter((p) => p.team === team && isSelectableFieldPlayer(p, removedIds));
     separateSameTeamPlayers(allTeamPlayers, active ? active.id : null);
   }
 
@@ -583,9 +611,11 @@ export function tickGame(
   updateGoalkeepers(state, dt);
 
   // 7. Resolve player-ball collisions, tracking last touch for own-goal detection
-  // Players currently leaving/on the bench/returning don't physically interact with the ball.
+  // Players currently leaving/on the bench/returning (temporaryRemoval.ts)
+  // don't physically interact with the ball, nor do unused bench players
+  // (benchDeployment.ts) — a temporarily-deployed substitute does.
   const touchedId = resolvePlayerBallCollisions(
-    state.players.filter((p) => !removedIds.has(p.id)), state.ball,
+    state.players.filter((p) => !removedIds.has(p.id) && p.matchStatus !== 'bench'), state.ball,
   );
   if (touchedId !== null) {
     const toucher = state.players.find((p) => p.id === touchedId);
@@ -609,7 +639,7 @@ export function tickGame(
     if (state.autoSwitchInputLockRemaining[team] > 0) continue;
     const activePlayer = state.players.find((p) => p.team === team && p.active);
     if (!activePlayer) continue;
-    const teammates = state.players.filter((p) => p.team === team && p.role !== 'goalkeeper' && !removedIds.has(p.id));
+    const teammates = state.players.filter((p) => p.team === team && isSelectableFieldPlayer(p, removedIds));
     const receiverId = findTeammateBallReceive(teammates, activePlayer.id, state.ball);
     if (receiverId) {
       state.manualActivePlayerId[team] = receiverId;

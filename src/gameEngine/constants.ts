@@ -118,6 +118,10 @@ export const GOALKEEPER_REACT_RANGE = GOALKEEPER_ZONE_DEPTH + 260;
 export const GOALKEEPER_BALL_DAMPING = 0.18;
 export const GOALKEEPER_BUMP_FORCE = 60;
 
+// Bench + temporary substitute — mirrors osma-liga/game/constants.ts.
+export const DEFAULT_BENCH_SIZE = 1;
+export const BENCH_DEPLOY_DURATION_MS = 30_000;
+
 // Corner clear
 export const CORNER_ZONE_MARGIN = 72;
 export const CORNER_CLEAR_DELAY = 8;

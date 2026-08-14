@@ -5,6 +5,15 @@ export interface Vec2 { x: number; y: number; }
 // Mirrors osma-liga/game/types.ts PlayerRole.
 export type PlayerRole = 'field_player' | 'goalkeeper';
 
+// Bench + temporary substitute — separate system from the unrelated
+// TemporaryPlayerRemoval mechanic below (random substitution). A player is
+// either 'field' (on the pitch as one of the regular starters/goalkeeper),
+// 'bench' (off the pitch, not yet used, waiting to be deployed), or
+// 'temporarily_deployed' (bench player currently active on the pitch for a
+// fixed BENCH_DEPLOY_DURATION_MS window — see benchDeployment.ts). Mirrors
+// osma-liga/game/types.ts PlayerMatchStatus.
+export type PlayerMatchStatus = 'field' | 'bench' | 'temporarily_deployed';
+
 export interface OnlinePlayer {
   id: string;
   team: 'home' | 'away';
@@ -21,6 +30,10 @@ export interface OnlinePlayer {
   // Parametric capability profile — see playerStats.ts. Each player owns its
   // own copy (createInitialState.ts clones the defaults).
   stats: PlayerStats;
+  // Bench + temporary substitute — see benchDeployment.ts. Goalkeepers never
+  // change from 'field'/false (not bench-eligible in this version).
+  matchStatus: PlayerMatchStatus;
+  benchUsed: boolean;
 }
 
 export interface OnlineBall {
@@ -99,4 +112,14 @@ export interface OnlineGameState {
   temporaryRemovals: TemporaryPlayerRemoval[];
   randomSubstitutionTriggerSecond: { home: number; away: number };
   randomSubstitutionTriggered: { home: boolean; away: boolean };
+  // Bench + temporary substitute (separate system — see benchDeployment.ts).
+  benchDeployments: BenchDeployment[];
+}
+
+// Kept here (alongside TemporaryPlayerRemoval) to avoid a circular import
+// between types.ts and benchDeployment.ts; the module re-exports it.
+export interface BenchDeployment {
+  playerId: string;
+  team: 'home' | 'away';
+  remainingMs: number;
 }
