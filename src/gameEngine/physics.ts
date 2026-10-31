@@ -25,11 +25,16 @@ export function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
-export function updateBallPhysics(ball: OnlineBall, dt: number): void {
+// Returns the id of a goalkeeper the ball ran into during this move (see
+// sweepBallAgainstGoalkeepers), or null.
+export function updateBallPhysics(ball: OnlineBall, dt: number, goalkeepers: OnlinePlayer[] = []): string | null {
   // Move, then apply friction — same order as osma-liga/game/physics.ts
   // (friction first shortened every roll by ~3.4 % at the 30 Hz tick).
+  const fromX = ball.x;
+  const fromY = ball.y;
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
+  const sweptId = sweepBallAgainstGoalkeepers(goalkeepers, ball, fromX, fromY);
 
   const friction = Math.pow(0.35, dt);
   ball.vx *= friction;
@@ -70,6 +75,7 @@ export function updateBallPhysics(ball: OnlineBall, dt: number): void {
     ball.x = FIELD_R - BALL_RADIUS;
     ball.vx = -Math.abs(ball.vx) * BALL_WALL_RESTITUTION;
   }
+  return sweptId;
 }
 
 export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: OnlineBall): string | null {
@@ -87,23 +93,78 @@ export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: Onlin
       ball.x += nx * overlap;
       ball.y += ny * overlap;
 
-      // Stopping power: linearly interpolates/extrapolates between the
-      // field-player baseline (stoppingPower 0 — no damping, standard
-      // BUMP_FORCE) and the goalkeeper baseline (stoppingPower 1 — heavy
-      // damping, reduced bump) from playerStats.ts's default profiles.
-      // Mirrors osma-liga/game/physics.ts.
-      const damping = 1 - p.stats.stoppingPower * (1 - GOALKEEPER_BALL_DAMPING);
-      const bump = BUMP_FORCE + p.stats.stoppingPower * (GOALKEEPER_BUMP_FORCE - BUMP_FORCE);
-      ball.vx *= damping;
-      ball.vy *= damping;
-      ball.vx += nx * bump;
-      ball.vy += ny * bump;
-
+      bounceBallOffPlayer(ball, p, nx, ny);
       touched = p.id;
     }
   }
 
   return touched;
+}
+
+// Velocity response of the ball touching player `p` along the unit normal
+// (nx, ny) (player → ball). Shared by the overlap resolution above and the
+// goalkeeper sweep below.
+function bounceBallOffPlayer(ball: OnlineBall, p: OnlinePlayer, nx: number, ny: number): void {
+  // Stopping power: linearly interpolates/extrapolates between the
+  // field-player baseline (stoppingPower 0 — no damping, standard
+  // BUMP_FORCE) and the goalkeeper baseline (stoppingPower 1 — heavy
+  // damping, reduced bump) from playerStats.ts's default profiles.
+  // Mirrors osma-liga/game/physics.ts.
+  const damping = 1 - p.stats.stoppingPower * (1 - GOALKEEPER_BALL_DAMPING);
+  const bump = BUMP_FORCE + p.stats.stoppingPower * (GOALKEEPER_BUMP_FORCE - BUMP_FORCE);
+  ball.vx *= damping;
+  ball.vy *= damping;
+  ball.vx += nx * bump;
+  ball.vy += ny * bump;
+}
+
+// ── Goalkeeper swept contact ─────────────────────────────────────────────────
+// The overlap resolution above only sees where the ball ends up. When one
+// tick carries it past a goalkeeper's centre (a fast shot at the 30 Hz tick,
+// or a kick that snaps the ball forward right next to him), pushing it out
+// "away from the centre" sends it on into the net — through his body. For
+// goalkeepers only, the ball's straight path from (fromX, fromY) to its
+// current position is checked: if it entered his collision circle and
+// either left it again or got past the point closest to his centre, the
+// ball is put back at the entry point (1 px outside, like the client) and
+// bounces off there exactly like a normal contact (same hitbox
+// PLAYER_RADIUS + BALL_RADIUS, same damping and bump). A ball that only
+// reaches into him and stays in front is left to the overlap resolution as
+// before. Mirrors osma-liga/game/physics.ts. Returns the goalkeeper's id.
+export function sweepBallAgainstGoalkeepers(
+  goalkeepers: OnlinePlayer[], ball: OnlineBall, fromX: number, fromY: number,
+): string | null {
+  const r = PLAYER_RADIUS + BALL_RADIUS;
+  const dx = ball.x - fromX;
+  const dy = ball.y - fromY;
+  const a = dx * dx + dy * dy;
+  if (a < 1e-9) return null;
+
+  let hit: OnlinePlayer | null = null;
+  let hitT = Infinity;
+  for (const p of goalkeepers) {
+    const fx = fromX - p.x;
+    const fy = fromY - p.y;
+    const c = fx * fx + fy * fy - r * r;
+    if (c <= 0) continue; // already touching at the start — overlap resolution's case
+    const b = 2 * (fx * dx + fy * dy);
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) continue;
+    const t = (-b - Math.sqrt(disc)) / (2 * a);
+    if (t < 0 || t > 1 || t >= hitT) continue;
+    const endsInside = dist(ball.x, ball.y, p.x, p.y) < r;
+    const pastClosest = -(fx * dx + fy * dy) / a < 1;
+    if (endsInside && !pastClosest) continue;
+    hit = p;
+    hitT = t;
+  }
+  if (!hit) return null;
+
+  const n = normalize(fromX + dx * hitT - hit.x, fromY + dy * hitT - hit.y);
+  ball.x = hit.x + n.x * (r + 1);
+  ball.y = hit.y + n.y * (r + 1);
+  bounceBallOffPlayer(ball, hit, n.x, n.y);
+  return hit.id;
 }
 
 // Lets a non-active, available teammate "receive" a slow/catchable ball

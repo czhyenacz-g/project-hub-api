@@ -121,9 +121,13 @@ describe('goal attribution through the server engine', () => {
   });
 
   it('D: a goalkeeper save that still ends in the net is the shooter\'s goal', () => {
+    // A close angled shot he gets a glove to, deflected into the net. (The
+    // old scenario here — a kick pressed against him — only scored because
+    // the kick snapped the ball through his body; see
+    // goalkeeperCollision.test.ts.)
     const r = run({
-      me: { x: 700, y: 280 }, ball: { x: 728, y: 280 }, live: ['away:gk'],
-      inputs: [{ dur: 0.2, right: true }, { dur: 0.5, right: true, kick: true }, { dur: 0.05, right: true }, { dur: 2 }],
+      me: { x: 480, y: 500 }, ball: { x: 840, y: 160 }, ballVel: { x: 358, y: 716 }, live: ['away:gk'], prior: 'home',
+      inputs: [{ dur: 2 }],
     });
     expect(r.opponentTouches.has('gk')).toBe(true);
     expect([r.scoring, r.own]).toEqual(['home', false]);

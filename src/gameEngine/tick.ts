@@ -18,7 +18,7 @@ import { updateDribblePrep, applyDribblePrepBallControl } from './dribblePrep.js
 import { isOwnGoal as isOwnGoalKick } from './goalAttribution.js';
 import {
   dist, normalize, clamp,
-  updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
+  updateBallPhysics, resolvePlayerBallCollisions, sweepBallAgainstGoalkeepers, checkGoal,
   snapBallInFrontOfKicker, separateSameTeamPlayers, findTeammateBallReceive,
 } from './physics.js';
 import {
@@ -389,6 +389,15 @@ function resolveActivePlayer(
   return auto;
 }
 
+function recordTouch(state: OnlineGameState, playerId: string | null): void {
+  if (playerId === null) return;
+  const toucher = state.players.find((p) => p.id === playerId);
+  if (toucher) {
+    state.lastTouchTeam = toucher.team;
+    state.lastTouchPlayerId = toucher.id;
+  }
+}
+
 // A kick or a pass — the only plays that decide own goals
 // (goalAttribution.ts). Also counts as the last touch, like on the client.
 function recordKick(state: OnlineGameState, team: 'home' | 'away', playerId: string): void {
@@ -422,6 +431,12 @@ export function tickGame(
     state.status = 'finished';
     return;
   }
+
+  // Where the ball stood when this tick began — a kick below may snap it
+  // forward, and it must not be snapped through a goalkeeper (see
+  // sweepBallAgainstGoalkeepers).
+  const ballFromX = state.ball.x;
+  const ballFromY = state.ball.y;
 
   // 2b. Temporary removals (MVP: random substitution) — server authoritative,
   // run before active-player resolution so a freshly removed player is
@@ -675,16 +690,11 @@ export function tickGame(
   // Players currently leaving/on the bench/returning (temporaryRemoval.ts)
   // don't physically interact with the ball, nor do unused bench players
   // (benchDeployment.ts) — a temporarily-deployed substitute does.
-  const touchedId = resolvePlayerBallCollisions(
-    state.players.filter((p) => !removedIds.has(p.id) && p.matchStatus !== 'bench'), state.ball,
-  );
-  if (touchedId !== null) {
-    const toucher = state.players.find((p) => p.id === touchedId);
-    if (toucher) {
-      state.lastTouchTeam = toucher.team;
-      state.lastTouchPlayerId = toucher.id;
-    }
-  }
+  const onPitch = state.players.filter((p) => !removedIds.has(p.id) && p.matchStatus !== 'bench');
+  const goalkeepers = onPitch.filter((p) => p.role === 'goalkeeper');
+  const sweptId = sweepBallAgainstGoalkeepers(goalkeepers, state.ball, ballFromX, ballFromY);
+  const touchedId = resolvePlayerBallCollisions(onPitch, state.ball) ?? sweptId;
+  recordTouch(state, touchedId);
 
   // 7b. Teammate ball receive — a slow/catchable ball contact on a
   // non-active teammate makes them the new active player (short lock)
@@ -709,7 +719,7 @@ export function tickGame(
   }
 
   // 8. Update ball physics
-  updateBallPhysics(state.ball, dt);
+  recordTouch(state, updateBallPhysics(state.ball, dt, goalkeepers));
 
   // 8b. Corner clear: unstick ball stuck in corner
   if (state.cornerClearCooldown > 0) {
