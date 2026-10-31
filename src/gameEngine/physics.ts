@@ -26,14 +26,14 @@ export function clamp(v: number, min: number, max: number): number {
 }
 
 export function updateBallPhysics(ball: OnlineBall, dt: number): void {
-  // Apply friction
+  // Move, then apply friction — same order as osma-liga/game/physics.ts
+  // (friction first shortened every roll by ~3.4 % at the 30 Hz tick).
+  ball.x += ball.vx * dt;
+  ball.y += ball.vy * dt;
+
   const friction = Math.pow(0.35, dt);
   ball.vx *= friction;
   ball.vy *= friction;
-
-  // Move
-  ball.x += ball.vx * dt;
-  ball.y += ball.vy * dt;
 
   // Cap speed
   const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
