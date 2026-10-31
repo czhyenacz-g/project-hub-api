@@ -23,9 +23,10 @@ export function isSelectableFieldPlayer(p: OnlinePlayer, removedIds: Set<string>
 }
 
 // Holding spot for a bench player once deployed — just inside the field,
-// near the team's own baseline, distinct from the random-substitution bench
-// spot (getBenchPosition in temporaryRemoval.ts) so the two systems never
-// collide visually.
+// near the bottom (bench) touchline in the team's own corner, distinct from
+// the random-substitution bench spot (benchSideline.ts) so the two systems
+// never collide visually. The client renders it running up into this spot
+// from the bench line; the engine position itself is unchanged.
 export function getBenchEntryPosition(team: 'home' | 'away'): { x: number; y: number } {
   return { x: team === 'home' ? FIELD_L + 90 : FIELD_R - 90, y: FIELD_B - 60 };
 }
