@@ -8,7 +8,9 @@ import { MATCH_DURATION, BENCH_DEPLOY_DURATION_MS } from '../../gameEngine/const
 // points the socket layer uses (requestBenchDeploy with the connection role
 // derived from the join token, and the real startGame tick loop).
 
-type SnapshotPlayer = { id: string; team: string; matchStatus: string; benchUsed: boolean; benchRemainingMs: number | null };
+type SnapshotPlayer = {
+  id: string; team: string; matchStatus: string; benchUsed: boolean; benchRemainingMs: number | null; benchRole: string | null;
+};
 
 const codes: string[] = [];
 
@@ -135,5 +137,28 @@ describe('training challenge bench', () => {
     expect(benchOf(code, 'away').benchUsed).toBe(false);
     // The human still has theirs.
     expect(requestBenchDeploy(code, 'guest', benchOf(code, 'away').id)).toBe(true);
+  });
+
+  it('the bot calls its substitute up with a role (attacker when not leading), visible in the snapshot', () => {
+    vi.useFakeTimers();
+    const code = trainingRoom();
+    getGame(code)!.gameState!.timeLeftSeconds = MATCH_DURATION / 2 - 1;
+    vi.advanceTimersByTime(100);
+    expect(snapshotBench(code, 'home').benchRole).toBe('attacker');
+  });
+});
+
+describe('žolík role over the socket entry point', () => {
+  it('the requested role is applied and synced to both clients via the snapshot', () => {
+    const code = multiplayerRoom();
+    expect(requestBenchDeploy(code, 'guest', benchOf(code, 'away').id, 'defender')).toBe(true);
+    expect(snapshotBench(code, 'away').benchRole).toBe('defender');
+    expect(snapshotBench(code, 'home').benchRole).toBeNull();
+  });
+
+  it('an older client without a role gets an attacker', () => {
+    const code = multiplayerRoom();
+    expect(requestBenchDeploy(code, 'home', benchOf(code, 'home').id)).toBe(true);
+    expect(snapshotBench(code, 'home').benchRole).toBe('attacker');
   });
 });

@@ -1,9 +1,9 @@
-import { OnlineGameState, InputState } from '../../gameEngine/types.js';
+import { OnlineGameState, InputState, BenchRole } from '../../gameEngine/types.js';
 import { createInitialState } from '../../gameEngine/createInitialState.js';
 import { tickGame } from '../../gameEngine/tick.js';
 import { computeTrainingChallengeInput } from '../../gameEngine/ai.js';
 import { MATCH_DURATION } from '../../gameEngine/constants.js';
-import { canDeployFromBench, deployBenchPlayer } from '../../gameEngine/benchDeployment.js';
+import { canDeployFromBench, deployBenchPlayer, chooseBotBenchRole } from '../../gameEngine/benchDeployment.js';
 import { DEFAULT_BEHAVIOR_CONFIG, TRAINING_CHALLENGE_BEHAVIOR_CONFIG } from '../../gameEngine/teamBehavior.js';
 import { saveOnlineMatchResult } from './onlineMatchResultService.js';
 import { finishTournamentMatchFromOnlineGame } from './tournamentMatchResultService.js';
@@ -359,7 +359,7 @@ export function startGame(code: string, emitFn: EmitFn): boolean {
           (p) => p.team === 'home' && canDeployFromBench(p),
         );
         if (benchPlayer) {
-          deployBenchPlayer(room.gameState, 'home', benchPlayer.id);
+          deployBenchPlayer(room.gameState, 'home', benchPlayer.id, chooseBotBenchRole(room.gameState, 'home'));
         }
       }
     }
@@ -469,6 +469,7 @@ export function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): obj
       matchStatus: p.matchStatus,
       benchUsed: p.benchUsed,
       benchRemainingMs: benchRemainingById.get(p.id) ?? null,
+      benchRole: p.benchRole ?? null,
     })),
     goalMessage: state.goalMessage,
     isOwnGoal: state.isOwnGoal,
@@ -496,10 +497,15 @@ export function updateInput(code: string, team: 'home' | 'guest', input: InputSt
 // deployBenchPlayer() itself already requires `player.team === team`, so a
 // malicious client passing another team's player id simply fails the lookup
 // (not found -> false) — no redundant ownership check needed here.
-export function requestBenchDeploy(code: string, connectionTeam: 'home' | 'guest', playerId: string): boolean {
+export function requestBenchDeploy(
+  code: string,
+  connectionTeam: 'home' | 'guest',
+  playerId: string,
+  role: BenchRole = 'attacker',
+): boolean {
   const room = store.get(code);
   if (!room || !room.gameState) return false;
   if (room.gameState.status !== 'playing') return false;
   const engineTeam: 'home' | 'away' = connectionTeam === 'home' ? 'home' : 'away';
-  return deployBenchPlayer(room.gameState, engineTeam, playerId);
+  return deployBenchPlayer(room.gameState, engineTeam, playerId, role);
 }

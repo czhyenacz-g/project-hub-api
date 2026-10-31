@@ -3,6 +3,7 @@ import * as http from 'http';
 import { config } from '../config.js';
 import { getGame, startGame, updateInput, requestBenchDeploy } from '../modules/osmaLiga/onlineGames.js';
 import { InputState } from '../gameEngine/types.js';
+import { isBenchRole } from '../gameEngine/benchDeployment.js';
 
 export function attachSocketIO(httpServer: http.Server): IOServer {
   const io = new IOServer(httpServer, {
@@ -98,10 +99,18 @@ export function attachSocketIO(httpServer: http.Server): IOServer {
       updateInput(roomCode, playerTeam, clean);
     });
 
-    socket.on('deploy_bench_player', ({ playerId }: { playerId: string }) => {
+    socket.on('deploy_bench_player', (payload: { playerId?: unknown; role?: unknown } | undefined) => {
       if (!roomCode || !playerTeam) return;
+      const playerId = payload?.playerId;
       if (typeof playerId !== 'string') return;
-      const ok = requestBenchDeploy(roomCode, playerTeam, playerId);
+      // `role` is optional (older clients don't send it → attacker); anything
+      // that isn't a known role is rejected rather than silently coerced.
+      const role = payload?.role;
+      if (role !== undefined && !isBenchRole(role)) {
+        socket.emit('error', { message: 'Bench deploy rejected' });
+        return;
+      }
+      const ok = requestBenchDeploy(roomCode, playerTeam, playerId, role);
       if (!ok) {
         socket.emit('error', { message: 'Bench deploy rejected' });
       }

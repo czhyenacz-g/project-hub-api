@@ -1,4 +1,5 @@
 import { OnlineBall, OnlinePlayer } from './types.js';
+import { computeBenchRoleTarget } from './benchDeployment.js';
 import { FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CY } from './constants.js';
 
 // Shared principle (mirrors the bot engine's game/supportPositioning.ts):
@@ -131,9 +132,21 @@ export function computeTeamSupportInputs(
   config: TeamBehaviorConfig,
 ): Map<string, { x: number; y: number }> {
   const targets = new Map<string, { x: number; y: number }>();
+
+  // A deployed bench substitute always plays its called-up role (also with
+  // teammateSupportMode 'none' — its baseX/baseY is the off-pitch bench
+  // spot, so "return to base" would walk it off the field). The anchor and
+  // runner slots stay with the starters.
+  for (const p of players) {
+    if (p.team !== team || p.id === active.id || p.matchStatus !== 'temporarily_deployed') continue;
+    targets.set(p.id, computeBenchRoleTarget(team, p.benchRole ?? 'attacker', ball));
+  }
+
   if (config.teammateSupportMode === 'none') return targets;
 
-  const teammates = players.filter((p) => p.team === team && p.id !== active.id);
+  const teammates = players.filter(
+    (p) => p.team === team && p.id !== active.id && p.matchStatus !== 'temporarily_deployed',
+  );
   if (teammates.length === 0) return targets;
 
   const ownGoalX = team === 'home' ? FIELD_L : FIELD_R;

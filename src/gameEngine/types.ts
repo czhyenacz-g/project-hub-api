@@ -13,6 +13,10 @@ export type PlayerRole = 'field_player' | 'goalkeeper';
 // fixed BENCH_DEPLOY_DURATION_MS window — see benchDeployment.ts). Mirrors
 // osma-liga/game/types.ts PlayerMatchStatus.
 export type PlayerMatchStatus = 'field' | 'bench' | 'temporarily_deployed';
+// Role a bench substitute ("žolík") is called up with — decides where it
+// positions itself while not the controlled player (benchDeployment.ts
+// computeBenchRoleTarget). Mirrors osma-liga/game/types.ts BenchRole.
+export type BenchRole = 'attacker' | 'defender';
 
 export interface OnlinePlayer {
   id: string;
@@ -34,6 +38,8 @@ export interface OnlinePlayer {
   // change from 'field'/false (not bench-eligible in this version).
   matchStatus: PlayerMatchStatus;
   benchUsed: boolean;
+  // Set when deployed from the bench (deployBenchPlayer); unset otherwise.
+  benchRole?: BenchRole;
 }
 
 export interface OnlineBall {
