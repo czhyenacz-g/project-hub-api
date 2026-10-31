@@ -101,6 +101,8 @@ export function createInitialState(
     cornerClearCooldown: 0,
     lastTouchTeam: null,
     lastTouchPlayerId: null,
+    lastKickTeam: null,
+    lastKickPlayerId: null,
     isOwnGoal: false,
     lastScorer: null,
     autoActivePlayerId: { home: null, away: null },

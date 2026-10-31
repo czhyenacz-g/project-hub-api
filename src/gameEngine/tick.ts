@@ -15,6 +15,7 @@ import {
   TEAMMATE_BALL_RECEIVE_LOCK_MS, KICK_SELF_TRAP_PROTECTION_SECONDS, PLAYER_RADIUS,
 } from './constants.js';
 import { updateDribblePrep, applyDribblePrepBallControl } from './dribblePrep.js';
+import { isOwnGoal as isOwnGoalKick } from './goalAttribution.js';
 import {
   dist, normalize, clamp,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
@@ -118,6 +119,8 @@ function resetPositions(state: OnlineGameState): void {
   state.cornerClearCooldown = 0;
   state.lastTouchTeam = null;
   state.lastTouchPlayerId = null;
+  state.lastKickTeam = null;
+  state.lastKickPlayerId = null;
   state.isOwnGoal = false;
   state.lastScorer = null;
 }
@@ -357,8 +360,7 @@ function resolveActivePlayer(
       state.ball.vx += passVel.x;
       state.ball.vy += passVel.y;
       previousActive.kickCooldown = KICK_COOLDOWN;
-      state.lastTouchTeam = team;
-      state.lastTouchPlayerId = previousActive.id;
+      recordKick(state, team, previousActive.id);
       state.manualActivePlayerId[team] = passTarget.id;
       state.manualLockRemaining[team] = passAndSwitchConfig.manualLockSeconds;
       // While movement is held, the background auto-pick must follow the
@@ -385,6 +387,15 @@ function resolveActivePlayer(
     if (manualPlayer) return manualPlayer;
   }
   return auto;
+}
+
+// A kick or a pass — the only plays that decide own goals
+// (goalAttribution.ts). Also counts as the last touch, like on the client.
+function recordKick(state: OnlineGameState, team: 'home' | 'away', playerId: string): void {
+  state.lastTouchTeam = team;
+  state.lastTouchPlayerId = playerId;
+  state.lastKickTeam = team;
+  state.lastKickPlayerId = playerId;
 }
 
 export function tickGame(
@@ -583,6 +594,7 @@ export function tickGame(
                 state.ball.vx += norm.x * KICK_FORCE * forceMultiplier * p.stats.shotPower;
                 state.ball.vy += norm.y * KICK_FORCE * forceMultiplier * p.stats.shotPower;
                 p.kickCooldown = KICK_COOLDOWN;
+                recordKick(state, team, p.id);
                 if (teamConfig.preparedTurns) {
                   state.kickSelfTrap[team] = { playerId: p.id, remaining: KICK_SELF_TRAP_PROTECTION_SECONDS };
                 }
@@ -599,6 +611,7 @@ export function tickGame(
             state.ball.vx += norm.x * KICK_FORCE * p.stats.shotPower;
             state.ball.vy += norm.y * KICK_FORCE * p.stats.shotPower;
             p.kickCooldown = AI_KICK_COOLDOWN;
+            recordKick(state, team, p.id);
           }
         }
       } else {
@@ -625,6 +638,7 @@ export function tickGame(
             state.ball.vx += dir * SUPPORT_KICK_FORCE * p.stats.shotPower;
             state.ball.vy += (Math.random() - 0.5) * 60;
             p.kickCooldown = KICK_COOLDOWN;
+            recordKick(state, team, p.id);
           }
         }
       }
@@ -720,6 +734,9 @@ export function tickGame(
       state.ball.vy = cDir.y * CORNER_CLEAR_SPEED + (Math.random() - 0.5) * 40;
       state.cornerTimer = 0;
       state.cornerClearCooldown = CORNER_CLEAR_COOLDOWN;
+      // The game moved the ball, not a player — nobody owns what follows.
+      state.lastKickTeam = null;
+      state.lastKickPlayerId = null;
     }
   } else if (!inCorner) {
     state.cornerTimer = 0;
@@ -728,12 +745,11 @@ export function tickGame(
   // 9. Check for goal
   const scorer = checkGoal(state.ball);
   if (scorer !== null) {
-    // Own goal: ball scored into the scoring team's OWN net by their last touch.
-    // Scoring stays attributed to `scorer` regardless (that's already
-    // footballingly correct) — this only changes which message is shown.
-    const isOwnGoal =
-      (scorer === 'away' && state.lastTouchTeam === 'home') ||
-      (scorer === 'home' && state.lastTouchTeam === 'away');
+    // Own goal only when the conceding team kicked last — a passive touch
+    // (block, deflection, goalkeeper save) never makes one. The score is
+    // credited to `scorer` regardless; this only picks the message and the
+    // goal event's flag.
+    const isOwnGoal = isOwnGoalKick(scorer, state.lastKickTeam);
 
     state.score[scorer]++;
     state.goalPause = GOAL_PAUSE_DURATION;

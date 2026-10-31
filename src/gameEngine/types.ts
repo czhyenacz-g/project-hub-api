@@ -87,9 +87,14 @@ export interface OnlineGameState {
   goalPause: number;
   cornerTimer: number;
   cornerClearCooldown: number;
-  // Last touch tracking — used for own goal detection (mirrors game/types.ts on the client)
+  // Last player the ball touched, actively or passively (bookkeeping only;
+  // mirrors game/types.ts on the client).
   lastTouchTeam: 'home' | 'away' | null;
   lastTouchPlayerId: string | null;
+  // Last ACTIVE play — kick or pass. Decides own goals, see
+  // goalAttribution.ts; passive contacts never change it.
+  lastKickTeam: 'home' | 'away' | null;
+  lastKickPlayerId: string | null;
   isOwnGoal: boolean;
   // Which team was credited with the most recent goal — lets each connected
   // client work out, from its own role, whether it scored or conceded.
