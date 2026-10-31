@@ -16,7 +16,7 @@ import {
 } from './constants.js';
 import { updateDribblePrep, applyDribblePrepBallControl } from './dribblePrep.js';
 import {
-  dist, normalize,
+  dist, normalize, clamp,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
   snapBallInFrontOfKicker, separateSameTeamPlayers, findTeammateBallReceive,
 } from './physics.js';
@@ -142,8 +142,8 @@ function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number, 
   player.vx = dir ? dir.x * speed : 0;
   player.vy = dir ? dir.y * speed : 0;
   if (!dir) return;
-  player.x = clampToField(player.x + player.vx * dt, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);
-  player.y = clampToField(player.y + player.vy * dt, FIELD_T + PLAYER_RADIUS, FIELD_B - PLAYER_RADIUS);
+  player.x = clamp(player.x + player.vx * dt, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);
+  player.y = clamp(player.y + player.vy * dt, FIELD_T + PLAYER_RADIUS, FIELD_B - PLAYER_RADIUS);
 }
 
 function returnToBase(player: OnlinePlayer, dt: number): void {

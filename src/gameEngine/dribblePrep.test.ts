@@ -88,12 +88,13 @@ describe('server ball physics V3 (prepared turns)', () => {
     expect(turn(b.state, b.meId, { left: true }, DEFAULT_BEHAVIOR_CONFIG, 0.6, behind).prep).toBe(0);
   });
 
-  it('the controlled player stays on the pitch at the touchline', () => {
-    const { state, meId } = solo();
-    const r = turn(state, meId, { up: true }, DEFAULT_BEHAVIOR_CONFIG, 0.3);
-    const r2 = turn(state, meId, { down: true }, DEFAULT_BEHAVIOR_CONFIG, 0.1);
-    expect(Math.min(r.minY, r2.minY)).toBeGreaterThanOrEqual(FIELD_T + PLAYER_RADIUS);
-    expect(Math.max(r.maxY, r2.maxY)).toBeLessThanOrEqual(FIELD_B - PLAYER_RADIUS);
+  it('the controlled player reaches the touchline but never crosses it', () => {
+    for (const [input, edge] of [[{ up: true }, FIELD_T + PLAYER_RADIUS], [{ down: true }, FIELD_B - PLAYER_RADIUS]] as const) {
+      const { state, meId } = solo();
+      state.inputs.home = { ...idle(), ...input };
+      for (let i = 0; i < 60; i++) tickGame(state, DT, DEFAULT_BEHAVIOR_CONFIG, NO_REMOVALS);
+      expect(state.players.find((p) => p.id === meId)!.y).toBe(edge);
+    }
   });
 
   it('a human kick arms the self-trap protection for the kicker only', () => {
