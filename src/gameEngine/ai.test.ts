@@ -6,7 +6,7 @@ import { TRAINING_CHALLENGE_BEHAVIOR_CONFIG, DEFAULT_BEHAVIOR_CONFIG } from './t
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG } from './temporaryRemoval.js';
 import { canDeployFromBench, deployBenchPlayer } from './benchDeployment.js';
 import {
-  FIELD_L, FIELD_R, FIELD_T, FIELD_CY, KICK_RANGE, KICK_COOLDOWN, AI_KICK_COOLDOWN, MATCH_DURATION,
+  FIELD_L, FIELD_R, FIELD_T, FIELD_CY, AI_KICK_RANGE as KICK_RANGE, KICK_COOLDOWN, AI_KICK_COOLDOWN, MATCH_DURATION,
   PLAYER_SPEED,
 } from './constants.js';
 import type { OnlineGameState, OnlinePlayer, InputState } from './types.js';

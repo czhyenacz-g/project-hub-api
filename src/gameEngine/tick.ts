@@ -1,12 +1,12 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
-  KICK_RANGE, KICK_FORCE, KICK_COOLDOWN, AI_KICK_COOLDOWN,
+  KICK_RANGE, AI_KICK_RANGE, KICK_FORCE, KICK_COOLDOWN, AI_KICK_COOLDOWN,
   KICK_TAP_FORCE_MULTIPLIER, KICK_MAX_CHARGE_FORCE_MULTIPLIER, KICK_MAX_CHARGE_MS,
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
   AUTO_PLAYER_SWITCH_COOLDOWN_MS, AUTO_SWITCH_INPUT_LOCK_MS,
   MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
-  BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
+  BALL_CONTROL_RADIUS, AI_BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   BALL_RETENTION_RADIUS, BALL_RETENTION_NO_OPPONENT_RADIUS, BALL_RETENTION_MAX_BALL_SPEED,
   BALL_RETENTION_STRENGTH, BALL_STOP_DAMPING,
   KICK_CONTACT_RANGE, KICK_CONTACT_BALL_NUDGE, KICK_CONTACT_FORCE_MULTIPLIER,
@@ -483,14 +483,22 @@ export function tickGame(
           );
         }
 
+        // Human teams measure ball reach (control, retention, kick) from
+        // where the player stood at the start of the tick, like the bot
+        // engine (osma-liga/game/updateGame.ts activeDist); the challenge bot
+        // keeps measuring after its move.
+        const preMoveBallDist = dist(p.x, p.y, state.ball.x, state.ball.y);
         movePlayerByInput(p, input, dt, speedCap);
 
         // Ball control: strong when player holds direction, gentle otherwise
         const prepHandled = teamConfig.preparedTurns && !input.kick && !selfTrapProtected
           && applyDribblePrepBallControl(state.dribblePrep[team], p, state.ball, dt);
         if (!input.kick && !selfTrapProtected && !prepHandled) {
-          const bcDist = dist(p.x, p.y, state.ball.x, state.ball.y);
-          if (bcDist < BALL_CONTROL_RADIUS) {
+          const bcDist = teamConfig.usesChargedKick ? preMoveBallDist : dist(p.x, p.y, state.ball.x, state.ball.y);
+          // Human teams: the shared (bot-engine) radius; the challenge bot
+          // keeps its own explicit AI_BALL_CONTROL_RADIUS.
+          const controlRadius = teamConfig.usesChargedKick ? BALL_CONTROL_RADIUS : AI_BALL_CONTROL_RADIUS;
+          if (bcDist < controlRadius) {
             state.ball.vx *= BALL_CONTROL_DAMPING;
             state.ball.vy *= BALL_CONTROL_DAMPING;
             const hasInput = input.left || input.right || input.up || input.down;
@@ -549,8 +557,7 @@ export function tickGame(
             state.kickWasDown[team] = true;
           } else {
             if (state.kickWasDown[team] && p.kickCooldown <= 0) {
-              const d = dist(p.x, p.y, state.ball.x, state.ball.y);
-              if (d <= KICK_RANGE) {
+              if (preMoveBallDist < KICK_RANGE) {
                 const norm = computeKickDirection(input, team);
                 const chargeT = Math.min((state.kickHeldSeconds[team] * 1000) / KICK_MAX_CHARGE_MS, 1);
                 let forceMultiplier = KICK_TAP_FORCE_MULTIPLIER
@@ -586,7 +593,7 @@ export function tickGame(
           }
         } else if (input.kick && p.kickCooldown <= 0) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
-          if (d <= KICK_RANGE) {
+          if (d <= AI_KICK_RANGE) {
             const norm = computeKickDirection(input, team);
             snapBallInFrontOfKicker(state.ball, p.x, p.y, norm.x, norm.y);
             state.ball.vx += norm.x * KICK_FORCE * p.stats.shotPower;
@@ -613,7 +620,7 @@ export function tickGame(
         // (training challenge AI support only — never human multiplayer teams).
         if (supportTarget && teamConfig.supportCanShoot && p.kickCooldown <= 0) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
-          if (d <= KICK_RANGE) {
+          if (d <= AI_KICK_RANGE) {
             const dir = team === 'home' ? 1 : -1;
             state.ball.vx += dir * SUPPORT_KICK_FORCE * p.stats.shotPower;
             state.ball.vy += (Math.random() - 0.5) * 60;

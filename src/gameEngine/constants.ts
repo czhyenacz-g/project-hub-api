@@ -12,7 +12,16 @@ export const GOAL_DEPTH = 18;
 export const PLAYER_RADIUS = 18;
 export const BALL_RADIUS = 10;
 export const PLAYER_SPEED = 210;
-export const KICK_RANGE = 40;
+// Human kick reach — mirrors osma-liga/game/constants.ts KICK_RANGE. Must
+// stay >= BALL_CONTROL_RADIUS: with control 44 / kick 40 a ball the player
+// still controlled (or that rolled a few px ahead while the kick key was
+// held) silently didn't fire on release.
+export const KICK_RANGE = 57;
+// Training-challenge bot (AI-driven team): explicit, unchanged reach — the
+// bot's shooting decision (ai.ts) and its kick/support kicks, mirrors the
+// local bot's BOT_KICK_RANGE (PLAYER_RADIUS + 22). Part of the bot's
+// difficulty, not of the shared physics.
+export const AI_KICK_RANGE = 40;
 export const KICK_FORCE = 486; // -10% from 540
 export const KICK_COOLDOWN = 0.25;
 // Kick cooldown for AI-driven teams (training challenge home) — mirrors
@@ -29,7 +38,7 @@ export const AI_KICK_COOLDOWN = 0.85;
 // Only applies to teams with TeamBehaviorConfig.usesChargedKick (human-driven).
 export const KICK_TAP_FORCE_MULTIPLIER = 0.9;
 export const KICK_MAX_CHARGE_FORCE_MULTIPLIER = 1.5;
-export const KICK_MAX_CHARGE_MS = 1500;
+export const KICK_MAX_CHARGE_MS = 500; // mirrors osma-liga/game/constants.ts
 export const BUMP_FORCE = 110;
 export const RETURN_SPEED = 115;
 export const SUPPORT_PLAYER_SPEED = 120;
@@ -70,8 +79,12 @@ export const BALL_WALL_RESTITUTION = 0.75;
 export const MATCH_DURATION = 90;
 export const GOAL_PAUSE_DURATION = 2.5;
 
-// Ball control (soft trap for active player)
-export const BALL_CONTROL_RADIUS = 44;
+// Ball control (soft trap for active player) — human radius mirrors
+// osma-liga/game/constants.ts (57, "+30% stickiness"). The AI-driven team
+// keeps its previous 44 px (AI_BALL_CONTROL_RADIUS) — bot difficulty is not
+// part of this unification.
+export const BALL_CONTROL_RADIUS = 57;
+export const AI_BALL_CONTROL_RADIUS = 44;
 export const BALL_CONTROL_DAMPING = 0.86;
 export const BALL_CONTROL_FORCE = 130;
 export const BALL_CONTROL_INPUT_FORCE = 210;
@@ -83,7 +96,7 @@ export const BALL_CONTROL_OFFSET = 34;
 // (i.e. not a ball that was just struck). Only applies to human-driven
 // teams (TeamBehaviorConfig.usesChargedKick) — AI-driven teams keep their
 // current feel unchanged. Mirrors osma-liga/game/constants.ts.
-export const BALL_RETENTION_RADIUS = 42;
+export const BALL_RETENTION_RADIUS = 55;
 export const BALL_RETENTION_NO_OPPONENT_RADIUS = 70;
 export const BALL_RETENTION_MAX_BALL_SPEED = 180;
 export const BALL_RETENTION_STRENGTH = 0.14;

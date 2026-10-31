@@ -1,5 +1,5 @@
 import { OnlineGameState, InputState, OnlinePlayer } from './types.js';
-import { KICK_RANGE, FIELD_R, FIELD_T, FIELD_B, GOAL_T, GOAL_B } from './constants.js';
+import { AI_KICK_RANGE as KICK_RANGE, FIELD_R, FIELD_T, FIELD_B, GOAL_T, GOAL_B } from './constants.js';
 import { isSelectableFieldPlayer } from './benchDeployment.js';
 import { getRemovedPlayerIds } from './temporaryRemoval.js';
 
