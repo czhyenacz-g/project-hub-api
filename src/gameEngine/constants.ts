@@ -134,3 +134,36 @@ export const CORNER_CLEAR_DELAY = 8;
 export const CORNER_CLEAR_SPEED = 360;
 export const CORNER_CLEAR_REPOSITION = 96;
 export const CORNER_CLEAR_COOLDOWN = 1.5;
+
+// Ball physics V3 for human-driven teams (TeamBehaviorConfig.preparedTurns)
+// — mirrors osma-liga/game/gameplayProfiles.ts BALL_PHYSICS_V2
+// (kickSelfTrapProtectionSeconds) and BALL_PHYSICS_V3 1:1. See
+// dribblePrep.ts and osma-liga/docs/gameplay-physics-contract.md.
+// After a human's own kick, that kicker's ball control is skipped for this
+// long so it can't brake its own shot.
+export const KICK_SELF_TRAP_PROTECTION_SECONDS = 0.25;
+export const BALL_PHYSICS_V3 = {
+  dribbleControlRadius: 57,
+  dribbleMaxRelativeSpeed: 160,
+  dribbleMinControlSeconds: 0.12,
+  noOpponentRadius: 70,
+  shieldTurnMinAngleDeg: 120,
+  shieldContactRadius: 36,
+  turnMinAngleDeg: 60,
+  prepSeconds: 0.35,
+  prepSeconds180: 0.55,
+  prepPlayerSpeed: 90,
+  recoverSeconds: 0.15,
+  maxChainSeconds: 1.2,
+  chainResetSeconds: 0.3,
+  reaimMinAngleDeg: 45,
+  targetDistance: 34,
+  arcSpeed: 280,
+  angularGain: 8,
+  radialGain: 10,
+  maxRadialSpeed: 150,
+  velocityBlendRate: 30,
+  maxAccel: 3000,
+  settledAngleDeg: 25,
+  settledRelativeSpeed: 90,
+} as const;

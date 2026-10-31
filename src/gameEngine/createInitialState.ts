@@ -1,6 +1,7 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import { FIELD_CX, FIELD_CY, FIELD_L, FIELD_R, FIELD_B, GOALKEEPER_DEFAULT_DEPTH, MATCH_DURATION, DEFAULT_BENCH_SIZE } from './constants.js';
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG, TemporaryRemovalConfig, pickRandomTriggerSecond } from './temporaryRemoval.js';
+import { createDribblePrepState } from './dribblePrep.js';
 import { DEFAULT_FIELD_PLAYER_STATS, DEFAULT_GOALKEEPER_STATS } from './playerStats.js';
 
 function makeInput(): InputState {
@@ -117,5 +118,7 @@ export function createInitialState(
     },
     randomSubstitutionTriggered: { home: false, away: false },
     benchDeployments: [],
+    dribblePrep: { home: createDribblePrepState(), away: createDribblePrepState() },
+    kickSelfTrap: { home: { playerId: null, remaining: 0 }, away: { playerId: null, remaining: 0 } },
   };
 }

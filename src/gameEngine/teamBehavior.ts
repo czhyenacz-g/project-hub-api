@@ -20,6 +20,10 @@ export interface TeamBehaviorConfig {
   // sense for a human holding a button. AI-driven teams keep the old
   // immediate-fire-on-press kick so their shot timing doesn't change.
   usesChargedKick: boolean;
+  // Ball physics V3 for this team's controlled player: prepared turns with
+  // the ball (dribblePrep.ts) + own-kick self-trap protection. Human-driven
+  // teams only; the training-challenge bot keeps its classic feel.
+  preparedTurns: boolean;
 }
 
 export interface GameBehaviorConfig {
@@ -34,6 +38,7 @@ export const MULTIPLAYER_TEAM_BEHAVIOR: TeamBehaviorConfig = {
   supportChaseWeight: 0.35,
   supportSpacing: 110,
   usesChargedKick: true,
+  preparedTurns: true,
 };
 
 export const TRAINING_CHALLENGE_GUEST_BEHAVIOR: TeamBehaviorConfig = {
@@ -47,6 +52,7 @@ export const TRAINING_CHALLENGE_HOME_BEHAVIOR: TeamBehaviorConfig = {
   supportChaseWeight: 0.7,
   supportSpacing: 90,
   usesChargedKick: false,
+  preparedTurns: false,
 };
 
 export const DEFAULT_BEHAVIOR_CONFIG: GameBehaviorConfig = {

@@ -120,6 +120,37 @@ export interface OnlineGameState {
   randomSubstitutionTriggered: { home: boolean; away: boolean };
   // Bench + temporary substitute (separate system — see benchDeployment.ts).
   benchDeployments: BenchDeployment[];
+  // Ball physics V3 (TeamBehaviorConfig.preparedTurns), per team — see
+  // dribblePrep.ts. kickSelfTrap: the kicker whose own ball control is
+  // skipped for a moment after its kick (KICK_SELF_TRAP_PROTECTION_SECONDS).
+  dribblePrep: { home: DribblePrepState; away: DribblePrepState };
+  kickSelfTrap: { home: KickSelfTrap; away: KickSelfTrap };
+}
+
+export interface KickSelfTrap {
+  playerId: string | null;
+  remaining: number;
+}
+
+// Mirrors osma-liga/game/types.ts DribblePrepState.
+export interface DribblePrepState {
+  // Active player this bookkeeping belongs to — a player switch resets it.
+  playerId: string | null;
+  // How long the active player has had the ball under control (s).
+  controlSeconds: number;
+  phase: 'none' | 'prep' | 'recover';
+  // Remaining time of the current phase (s).
+  remaining: number;
+  recoverTotal: number;
+  // Arc side chosen at prep start (+1/-1).
+  side: number;
+  // Direction the current prep is aiming for (re-aimed on a new turn).
+  prepDir: Vec2 | null;
+  // Prep time in the current chain of turns / time without prep.
+  chainSeconds: number;
+  idleSeconds: number;
+  // Sharp turn — may run under the shield (drag-back) rules.
+  shield: boolean;
 }
 
 // Kept here (alongside TemporaryPlayerRemoval) to avoid a circular import

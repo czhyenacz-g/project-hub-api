@@ -12,8 +12,9 @@ import {
   KICK_CONTACT_RANGE, KICK_CONTACT_BALL_NUDGE, KICK_CONTACT_FORCE_MULTIPLIER,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
-  TEAMMATE_BALL_RECEIVE_LOCK_MS,
+  TEAMMATE_BALL_RECEIVE_LOCK_MS, KICK_SELF_TRAP_PROTECTION_SECONDS, PLAYER_RADIUS,
 } from './constants.js';
+import { updateDribblePrep, applyDribblePrepBallControl } from './dribblePrep.js';
 import {
   dist, normalize,
   updateBallPhysics, resolvePlayerBallCollisions, checkGoal,
@@ -121,21 +122,28 @@ function resetPositions(state: OnlineGameState): void {
   state.lastScorer = null;
 }
 
-function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number): void {
+function inputDirection(input: InputState): { x: number; y: number } | null {
   let dx = 0;
   let dy = 0;
   if (input.up) dy -= 1;
   if (input.down) dy += 1;
   if (input.left) dx -= 1;
   if (input.right) dx += 1;
-
   const len = Math.sqrt(dx * dx + dy * dy);
-  if (len > 0) {
-    dx /= len;
-    dy /= len;
-    player.x += dx * player.stats.speed * dt;
-    player.y += dy * player.stats.speed * dt;
-  }
+  return len > 0 ? { x: dx / len, y: dy / len } : null;
+}
+
+// Moves the controlled player and records its velocity (vx/vy — used by
+// ball retention and dribblePrep.ts). `speedCap` = dribble-prep slow-down.
+// Kept inside the pitch like the bot engine (osma-liga/game/updateGame.ts).
+function movePlayerByInput(player: OnlinePlayer, input: InputState, dt: number, speedCap = Infinity): void {
+  const dir = inputDirection(input);
+  const speed = Math.min(player.stats.speed, speedCap);
+  player.vx = dir ? dir.x * speed : 0;
+  player.vy = dir ? dir.y * speed : 0;
+  if (!dir) return;
+  player.x = clampToField(player.x + player.vx * dt, FIELD_L + PLAYER_RADIUS, FIELD_R - PLAYER_RADIUS);
+  player.y = clampToField(player.y + player.vy * dt, FIELD_T + PLAYER_RADIUS, FIELD_B - PLAYER_RADIUS);
 }
 
 function returnToBase(player: OnlinePlayer, dt: number): void {
@@ -458,10 +466,29 @@ export function tickGame(
           if (p.kickCooldown < 0) p.kickCooldown = 0;
         }
 
-        movePlayerByInput(p, input, dt);
+        // Ball physics V3 (human teams): own-kick self-trap protection +
+        // prepared turns — see dribblePrep.ts.
+        let selfTrapProtected = false;
+        let speedCap = Infinity;
+        if (teamConfig.preparedTurns) {
+          const trap = state.kickSelfTrap[team];
+          if (trap.remaining > 0) {
+            trap.remaining = Math.max(0, trap.remaining - dt);
+            if (trap.remaining === 0) trap.playerId = null;
+          }
+          selfTrapProtected = trap.remaining > 0 && trap.playerId === p.id;
+          const opponents = state.players.filter((o) => o.team !== team && !removedIds.has(o.id) && o.matchStatus !== 'bench');
+          speedCap = updateDribblePrep(
+            state.dribblePrep[team], p, state.ball, opponents, inputDirection(input), input.kick, selfTrapProtected, dt,
+          );
+        }
+
+        movePlayerByInput(p, input, dt, speedCap);
 
         // Ball control: strong when player holds direction, gentle otherwise
-        if (!input.kick) {
+        const prepHandled = teamConfig.preparedTurns && !input.kick && !selfTrapProtected
+          && applyDribblePrepBallControl(state.dribblePrep[team], p, state.ball, dt);
+        if (!input.kick && !selfTrapProtected && !prepHandled) {
           const bcDist = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (bcDist < BALL_CONTROL_RADIUS) {
             state.ball.vx *= BALL_CONTROL_DAMPING;
@@ -500,10 +527,8 @@ export function tickGame(
               if (bcDist < BALL_RETENTION_RADIUS && ballSpeed < BALL_RETENTION_MAX_BALL_SPEED) {
                 const oppDist = nearestOpponentDistance(state, state.ball.x, state.ball.y, team, removedIds);
                 if (oppDist > BALL_RETENTION_NO_OPPONENT_RADIUS) {
-                  const playerVx = hasInput ? tNorm.x * p.stats.speed : 0;
-                  const playerVy = hasInput ? tNorm.y * p.stats.speed : 0;
-                  state.ball.vx += (playerVx - state.ball.vx) * BALL_RETENTION_STRENGTH;
-                  state.ball.vy += (playerVy - state.ball.vy) * BALL_RETENTION_STRENGTH;
+                  state.ball.vx += (p.vx - state.ball.vx) * BALL_RETENTION_STRENGTH;
+                  state.ball.vy += (p.vy - state.ball.vy) * BALL_RETENTION_STRENGTH;
                   if (!hasInput) {
                     state.ball.vx *= BALL_STOP_DAMPING;
                     state.ball.vy *= BALL_STOP_DAMPING;
@@ -551,6 +576,9 @@ export function tickGame(
                 state.ball.vx += norm.x * KICK_FORCE * forceMultiplier * p.stats.shotPower;
                 state.ball.vy += norm.y * KICK_FORCE * forceMultiplier * p.stats.shotPower;
                 p.kickCooldown = KICK_COOLDOWN;
+                if (teamConfig.preparedTurns) {
+                  state.kickSelfTrap[team] = { playerId: p.id, remaining: KICK_SELF_TRAP_PROTECTION_SECONDS };
+                }
               }
             }
             state.kickWasDown[team] = false;
