@@ -1,7 +1,7 @@
 import { OnlineGameState, OnlinePlayer, InputState } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B, FIELD_CX, FIELD_CY,
-  KICK_RANGE, KICK_FORCE, KICK_COOLDOWN,
+  KICK_RANGE, KICK_FORCE, KICK_COOLDOWN, AI_KICK_COOLDOWN,
   KICK_TAP_FORCE_MULTIPLIER, KICK_MAX_CHARGE_FORCE_MULTIPLIER, KICK_MAX_CHARGE_MS,
   RETURN_SPEED, SUPPORT_PLAYER_SPEED, SUPPORT_KICK_FORCE, ACTIVE_PLAYER_SWITCH_MARGIN, ACTIVE_PLAYER_SWITCH_MARGIN_FADE_DISTANCE,
   AUTO_PLAYER_SWITCH_COOLDOWN_MS, AUTO_SWITCH_INPUT_LOCK_MS,
@@ -283,6 +283,7 @@ function resolveActivePlayer(
   dt: number,
   removedIds: Set<string>,
   passAndSwitchConfig: PassAndSwitchConfig,
+  lockAutoSwitchOnMovement: boolean,
 ): OnlinePlayer | null {
   // A manual pick that became temporarily removed (e.g. random substitution
   // mid-lock) immediately loses the override — automatic selection takes
@@ -301,7 +302,11 @@ function resolveActivePlayer(
   // here, and the teammate-ball-receive takeover further down in tickGame).
   // The lock stays engaged for AUTO_SWITCH_INPUT_LOCK_MS after input is
   // released too. Manual switching (Q / PŘEP.) below is unaffected.
-  const hasMovementInput = input.up || input.down || input.left || input.right;
+  // Human-driven teams only: an AI controller (training challenge home)
+  // holds a direction nearly every tick, so the lock would pin it to one
+  // player for the whole match — it relies on the distance-based auto-pick
+  // (margin + AUTO_PLAYER_SWITCH_COOLDOWN_MS) instead.
+  const hasMovementInput = lockAutoSwitchOnMovement && (input.up || input.down || input.left || input.right);
   if (hasMovementInput) {
     state.autoSwitchInputLockRemaining[team] = AUTO_SWITCH_INPUT_LOCK_MS / 1000;
   } else if (state.autoSwitchInputLockRemaining[team] > 0) {
@@ -408,8 +413,10 @@ export function tickGame(
   const teams: Array<'home' | 'away'> = ['home', 'away'];
   for (const team of teams) {
     const input: InputState = team === 'home' ? state.inputs.home : state.inputs.guest;
-    const active = resolveActivePlayer(state, team, input, dt, removedIds, passAndSwitchConfig);
     const teamConfig: TeamBehaviorConfig = behaviorConfig[team];
+    const active = resolveActivePlayer(
+      state, team, input, dt, removedIds, passAndSwitchConfig, teamConfig.activeController === 'human',
+    );
     const supportTargets = active
       ? computeTeamSupportInputs(
           state.players.filter((p) => isSelectableFieldPlayer(p, removedIds)), team, active, state.ball, teamConfig,
@@ -504,8 +511,8 @@ export function tickGame(
 
         // 6. Kick — charged for human-driven teams (tap = weaker, hold =
         // stronger, fires on release); AI-driven teams (training challenge
-        // home) keep the old immediate-fire-on-press kick so their shot
-        // timing doesn't change. See TeamBehaviorConfig.usesChargedKick.
+        // home) keep the old immediate-fire-on-press kick, with the local
+        // bot's longer AI_KICK_COOLDOWN. See TeamBehaviorConfig.usesChargedKick.
         if (teamConfig.usesChargedKick) {
           if (input.kick) {
             state.kickHeldSeconds[team] = state.kickWasDown[team] ? state.kickHeldSeconds[team] + dt : 0;
@@ -551,7 +558,7 @@ export function tickGame(
             snapBallInFrontOfKicker(state.ball, p.x, p.y, norm.x, norm.y);
             state.ball.vx += norm.x * KICK_FORCE * p.stats.shotPower;
             state.ball.vy += norm.y * KICK_FORCE * p.stats.shotPower;
-            p.kickCooldown = KICK_COOLDOWN;
+            p.kickCooldown = AI_KICK_COOLDOWN;
           }
         }
       } else {

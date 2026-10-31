@@ -15,6 +15,12 @@ export const PLAYER_SPEED = 210;
 export const KICK_RANGE = 40;
 export const KICK_FORCE = 486; // -10% from 540
 export const KICK_COOLDOWN = 0.25;
+// Kick cooldown for AI-driven teams (training challenge home) — mirrors
+// osma-liga/game/constants.ts BOT_KICK_COOLDOWN so the server bot shoots at
+// the same rate as the single-player /hra/bot opponent. Longer than a
+// human's KICK_COOLDOWN on purpose: the server bot already moves at the full
+// human speed (PlayerStats.speed), unlike the slower local BOT_SPEED.
+export const AI_KICK_COOLDOWN = 0.85;
 
 // Charged kick — the shot fires on release of the kick button, not on press.
 // A quick tap (near-zero hold) still fires at KICK_TAP_FORCE_MULTIPLIER;
