@@ -254,9 +254,14 @@ function findAutoActivePlayer(
     state.autoSwitchCooldownRemaining[team] = Math.max(0, state.autoSwitchCooldownRemaining[team] - dt);
   }
 
+  // The current pick must still be selectable — a bench substitute whose
+  // 30 s ran out (matchStatus back to 'bench', benchDeployment.ts) must lose
+  // the role at once, or the team is left with an off-pitch "active" player
+  // that tickGame skips, i.e. nobody to control. Mirrors the bot engine,
+  // which looks the current pick up among selectable players only.
   const currentId = state.autoActivePlayerId[team];
-  const currentActive = currentId && !removedIds.has(currentId)
-    ? state.players.find((p) => p.team === team && p.id === currentId) ?? null
+  const currentActive = currentId
+    ? state.players.find((p) => p.team === team && p.id === currentId && isSelectableFieldPlayer(p, removedIds)) ?? null
     : null;
   if (!currentActive || !nearest) return nearest;
   if (state.autoSwitchCooldownRemaining[team] > 0 || !canAutoSwitch) return currentActive;
