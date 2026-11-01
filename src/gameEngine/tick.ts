@@ -36,6 +36,7 @@ import {
   PassAndSwitchConfig, DEFAULT_PASS_AND_SWITCH_CONFIG,
   hasBallControl, findBestPassTarget, computePassVelocity, findNearestTeammateToBall,
 } from './passAndSwitch.js';
+import { isShotSave, saveRoll, firstSaveSeq, saveOutcome, holdSeconds, heldBallSpot, releaseBall } from './goalkeeperSave.js';
 
 const GOAL_MESSAGES = [
   'Hlavní věc je, že to padlo!',
@@ -125,6 +126,7 @@ function resetPositions(state: OnlineGameState): void {
   state.isOwnGoal = false;
   state.lastScorer = null;
   state.shotAim = { home: null, away: null };
+  state.goalkeeperHold = null;
 }
 
 function inputDirection(input: InputState): { x: number; y: number } | null {
@@ -509,7 +511,7 @@ export function tickGame(
         let aim = state.shotAim[team];
         if (aim && (!teamConfig.preparedTurns || aim.playerId !== p.id || preMoveBallDist >= BALL_CONTROL_RADIUS)) aim = null;
         if (!aim && teamConfig.preparedTurns && input.kick && !state.kickWasDown[team]
-            && preMoveBallDist < KICK_RANGE && p.kickCooldown <= 0) {
+            && preMoveBallDist < KICK_RANGE && p.kickCooldown <= 0 && !state.goalkeeperHold) {
           aim = startShotAim(p.id, inputDirection(input), state.ball, attackSign);
         }
         state.shotAim[team] = aim;
@@ -614,7 +616,7 @@ export function tickGame(
             state.kickHeldSeconds[team] = state.kickWasDown[team] ? state.kickHeldSeconds[team] + dt : 0;
             state.kickWasDown[team] = true;
           } else {
-            if (state.kickWasDown[team] && p.kickCooldown <= 0) {
+            if (state.kickWasDown[team] && p.kickCooldown <= 0 && !state.goalkeeperHold) {
               if (preMoveBallDist < KICK_RANGE) {
                 // Aimed shot at goal, else the held keys (no keys: human teams
                 // aim at the goal centre like the bot engine).
@@ -656,7 +658,7 @@ export function tickGame(
             state.kickHeldSeconds[team] = 0;
             state.shotAim[team] = null;
           }
-        } else if (input.kick && p.kickCooldown <= 0) {
+        } else if (input.kick && p.kickCooldown <= 0 && !state.goalkeeperHold) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (d <= AI_KICK_RANGE) {
             const norm = computeKickDirection(input, team);
@@ -684,7 +686,7 @@ export function tickGame(
         // Conservative: support teammates only nudge the ball passively via
         // collisions (physics.ts) unless the mode explicitly allows shooting
         // (training challenge AI support only — never human multiplayer teams).
-        if (supportTarget && teamConfig.supportCanShoot && p.kickCooldown <= 0) {
+        if (supportTarget && teamConfig.supportCanShoot && p.kickCooldown <= 0 && !state.goalkeeperHold) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);
           if (d <= AI_KICK_RANGE) {
             const dir = team === 'home' ? 1 : -1;
@@ -730,6 +732,10 @@ export function tickGame(
   // (benchDeployment.ts) — a temporarily-deployed substitute does.
   const onPitch = state.players.filter((p) => !removedIds.has(p.id) && p.matchStatus !== 'bench');
   const goalkeepers = onPitch.filter((p) => p.role === 'goalkeeper');
+  // Ball velocity and last toucher going into this tick's contacts — a
+  // goalkeeper save is judged on them (step 8a below).
+  const shotVx = state.ball.vx, shotVy = state.ball.vy;
+  const touchBefore = state.lastTouchPlayerId;
   const sweptId = sweepBallAgainstGoalkeepers(goalkeepers, state.ball, ballFromX, ballFromY);
   // A field player's body push can also squeeze the ball across the
   // (smaller, 2026-11-01) goalkeeper — sweep that push too.
@@ -762,6 +768,9 @@ export function tickGame(
 
   // 8. Update ball physics
   recordTouch(state, updateBallPhysics(state.ball, dt, goalkeepers));
+
+  // 8a. Goalkeeper save outcome — catch / parry / clear, held ball.
+  updateGoalkeeperSave(state, dt, shotVx, shotVy, touchBefore, onPitch);
 
   // 8b. Corner clear: unstick ball stuck in corner
   if (state.cornerClearCooldown > 0) {
@@ -819,4 +828,62 @@ export function tickGame(
 
   // 10. Increment tick
   state.tick++;
+}
+
+// Goalkeeper save outcome (goalkeeperSave.ts), after the tick's ball
+// physics. A fresh real save is decided once (catch / parry / clear); a
+// caught ball stays pinned in front of the goalkeeper until his hold time
+// runs out, then he plays it out. Server authoritative — clients only see
+// the ball. Mirrors osma-liga/game/updateGame.ts.
+function updateGoalkeeperSave(
+  state: OnlineGameState, dt: number, shotVx: number, shotVy: number, touchBefore: string | null, onPitch: OnlinePlayer[],
+): void {
+  const hold = state.goalkeeperHold;
+  if (hold) {
+    const gk = onPitch.find((p) => p.id === hold.playerId);
+    if (!gk) {
+      state.goalkeeperHold = null;
+      return;
+    }
+    hold.remaining -= dt;
+    if (hold.remaining > 0) {
+      const spot = heldBallSpot(gk, gk.team);
+      state.ball.x = spot.x;
+      state.ball.y = spot.y;
+      state.ball.vx = 0;
+      state.ball.vy = 0;
+    } else {
+      state.goalkeeperHold = null;
+      playOutFromGoalkeeper(state, gk, onPitch, true, hold.seq);
+    }
+    return;
+  }
+
+  const gk = onPitch.find((p) => p.id === state.lastTouchPlayerId && p.role === 'goalkeeper');
+  if (!gk || touchBefore === gk.id || !isShotSave(shotVx, shotVy, gk.team, state.lastKickTeam)) return;
+  const seq = state.goalkeeperSaveSeq ?? firstSaveSeq(state.timeLeftSeconds, state.ball.x, state.ball.y);
+  state.goalkeeperSaveSeq = seq + 1;
+  const roll = saveRoll(seq);
+  const outcome = saveOutcome(roll);
+  if (outcome === 'catch') {
+    state.goalkeeperHold = { playerId: gk.id, remaining: holdSeconds(roll), seq };
+    const spot = heldBallSpot(gk, gk.team);
+    state.ball.x = spot.x;
+    state.ball.y = spot.y;
+    state.ball.vx = 0;
+    state.ball.vy = 0;
+  } else if (outcome === 'clear') {
+    playOutFromGoalkeeper(state, gk, onPitch, false, seq);
+  }
+}
+
+function playOutFromGoalkeeper(state: OnlineGameState, gk: OnlinePlayer, onPitch: OnlinePlayer[], allowPass: boolean, seq: number): void {
+  const teammates = onPitch.filter((p) => p.team === gk.team && p.role !== 'goalkeeper');
+  const opponents = onPitch.filter((p) => p.team !== gk.team);
+  const r = releaseBall(gk, gk.team, teammates, opponents, allowPass, saveRoll(seq, 1));
+  state.ball.x = r.x;
+  state.ball.y = r.y;
+  state.ball.vx = r.vx;
+  state.ball.vy = r.vy;
+  recordKick(state, gk.team, gk.id);
 }

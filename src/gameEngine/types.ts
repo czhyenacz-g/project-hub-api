@@ -1,5 +1,6 @@
 import { PlayerStats } from './playerStats.js';
 import type { ShotAimState } from './shotAim.js';
+import type { GoalkeeperHold } from './goalkeeperSave.js';
 
 export interface Vec2 { x: number; y: number; }
 
@@ -133,6 +134,11 @@ export interface OnlineGameState {
   kickSelfTrap: { home: KickSelfTrap; away: KickSelfTrap };
   // Aimed charged shot per team (human teams) — see shotAim.ts.
   shotAim: { home: ShotAimState | null; away: ShotAimState | null };
+  // Ball caught by a goalkeeper (goalkeeperSave.ts) — pinned in front of
+  // him until `remaining` runs out, then he passes or clears it.
+  goalkeeperHold: GoalkeeperHold | null;
+  // Next save's sequence number (goalkeeperSave.ts); null until the first save.
+  goalkeeperSaveSeq: number | null;
 }
 
 export interface KickSelfTrap {

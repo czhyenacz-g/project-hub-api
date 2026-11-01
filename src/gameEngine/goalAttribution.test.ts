@@ -68,6 +68,9 @@ function run(sc: Scenario) {
   const side = sc.side ?? 'home';
   const state: OnlineGameState = createInitialState(NO_REMOVALS);
   state.status = 'playing';
+  // Goalkeeper touches here are parries (goalkeeperSave.ts, sequence 1 =
+  // parry) — a caught/cleared ball is covered in goalkeeperSave.test.ts.
+  state.goalkeeperSaveSeq = 1;
   const find = (who: string) => {
     const [team, kind, n] = who.split(':');
     return state.players.filter((p) => p.team === team

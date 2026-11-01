@@ -270,7 +270,9 @@ describe('training challenge — deterministic full-match simulation vs an idle 
       for (const p of state.players) {
         if (p.team === 'home' && p.active && p.kickCooldown > (before.get(p.id) ?? 0) + 0.1) {
           homeKicks++;
-          if (state.ball.vx > 0) forwardKicks++;
+          // A shot the away goalkeeper catches or clears in the very same
+          // tick (goalkeeperSave.ts) went forward too.
+          if (state.ball.vx > 0 || state.lastTouchPlayerId === 'a-gk') forwardKicks++;
         }
       }
       if (state.lastTouchPlayerId !== lastTouch) {
