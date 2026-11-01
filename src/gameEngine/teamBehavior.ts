@@ -67,6 +67,23 @@ export const TRAINING_CHALLENGE_BEHAVIOR_CONFIG: GameBehaviorConfig = {
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// Off-ball positioning limit (mirrors the bot engine's game/attackZone.ts):
+// the pitch length split into eight segments; a support player WITHOUT the
+// ball never targets the last one before the opponent's goal. Only targets
+// are capped — a player already inside walks back at normal speed. The
+// active (human / AI-driven) player and goalkeepers never get these targets.
+export const ATTACK_LIMIT_DEPTH = (FIELD_R - FIELD_L) / 8;
+
+export function attackLimitX(team: 'home' | 'away'): number {
+  return team === 'home' ? FIELD_R - ATTACK_LIMIT_DEPTH : FIELD_L + ATTACK_LIMIT_DEPTH;
+}
+
+export function capOffBallTarget(team: 'home' | 'away', target: { x: number; y: number }): { x: number; y: number } {
+  const limit = attackLimitX(team);
+  const x = team === 'home' ? Math.min(target.x, limit) : Math.max(target.x, limit);
+  return x === target.x ? target : { x, y: target.y };
+}
+
 // Anchor prefers defending over shadowing the ball: it sits deep near its
 // own goal and only partly leans toward the ball's height, so it reads as
 // "the one who stays back" rather than another ball-chaser.
@@ -145,7 +162,7 @@ export function computeTeamSupportInputs(
   // runner slots stay with the starters.
   for (const p of players) {
     if (p.team !== team || p.id === active.id || p.matchStatus !== 'temporarily_deployed') continue;
-    targets.set(p.id, computeBenchRoleTarget(team, p.benchRole ?? 'attacker', ball));
+    targets.set(p.id, capOffBallTarget(team, computeBenchRoleTarget(team, p.benchRole ?? 'attacker', ball)));
   }
 
   if (config.teammateSupportMode === 'none') return targets;
@@ -165,7 +182,7 @@ export function computeTeamSupportInputs(
   if (runner) {
     targets.set(
       runner.id,
-      computeRunnerTarget(team, ball, active, anchorTarget ?? { x: active.x, y: active.y }, config),
+      capOffBallTarget(team, computeRunnerTarget(team, ball, active, anchorTarget ?? { x: active.x, y: active.y }, config)),
     );
   }
 
