@@ -1,3 +1,4 @@
+import { shotAimDir } from '../../gameEngine/shotAim.js';
 import { OnlineGameState, InputState, BenchRole } from '../../gameEngine/types.js';
 import { createInitialState } from '../../gameEngine/createInitialState.js';
 import { tickGame } from '../../gameEngine/tick.js';
@@ -476,7 +477,21 @@ export function buildSnapshot(state: OnlineGameState, room: OnlineGameRoom): obj
     lastScorer: state.lastScorer,
     homeClubName: room.homeClubName,
     awayClubName: room.awayClubName,
+    // Aim direction of each team's aimed charged shot at goal (unit vector,
+    // null when not aiming) — drawn by the client as an arrow. Additive
+    // field: older clients ignore it.
+    shotAim: {
+      home: aimSnapshot(state, 'home'),
+      away: aimSnapshot(state, 'away'),
+    },
   };
+}
+
+function aimSnapshot(state: OnlineGameState, team: 'home' | 'away'): { x: number; y: number } | null {
+  const aim = state.shotAim?.[team];
+  if (!aim || !state.kickWasDown[team]) return null;
+  const dir = shotAimDir(aim, state.ball, team === 'home' ? 1 : -1);
+  return dir && { x: Math.round(dir.x * 1000) / 1000, y: Math.round(dir.y * 1000) / 1000 };
 }
 
 export function updateInput(code: string, team: 'home' | 'guest', input: InputState): void {

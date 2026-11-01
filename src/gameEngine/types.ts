@@ -1,4 +1,5 @@
 import { PlayerStats } from './playerStats.js';
+import type { ShotAimState } from './shotAim.js';
 
 export interface Vec2 { x: number; y: number; }
 
@@ -130,6 +131,8 @@ export interface OnlineGameState {
   // skipped for a moment after its kick (KICK_SELF_TRAP_PROTECTION_SECONDS).
   dribblePrep: { home: DribblePrepState; away: DribblePrepState };
   kickSelfTrap: { home: KickSelfTrap; away: KickSelfTrap };
+  // Aimed charged shot per team (human teams) — see shotAim.ts.
+  shotAim: { home: ShotAimState | null; away: ShotAimState | null };
 }
 
 export interface KickSelfTrap {

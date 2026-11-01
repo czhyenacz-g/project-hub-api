@@ -122,5 +122,6 @@ export function createInitialState(
     benchDeployments: [],
     dribblePrep: { home: createDribblePrepState(), away: createDribblePrepState() },
     kickSelfTrap: { home: { playerId: null, remaining: 0 }, away: { playerId: null, remaining: 0 } },
+    shotAim: { home: null, away: null },
   };
 }

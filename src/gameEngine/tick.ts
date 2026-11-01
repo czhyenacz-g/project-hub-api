@@ -15,6 +15,7 @@ import {
   TEAMMATE_BALL_RECEIVE_LOCK_MS, KICK_SELF_TRAP_PROTECTION_SECONDS, PLAYER_RADIUS,
 } from './constants.js';
 import { updateDribblePrep, applyDribblePrepBallControl, carrierSpeedCap } from './dribblePrep.js';
+import { SHOT_AIM, startShotAim, steerShotAim, shotAimDir, goalLineX } from './shotAim.js';
 import { isOwnGoal as isOwnGoalKick } from './goalAttribution.js';
 import {
   dist, normalize, clamp,
@@ -123,6 +124,7 @@ function resetPositions(state: OnlineGameState): void {
   state.lastKickPlayerId = null;
   state.isOwnGoal = false;
   state.lastScorer = null;
+  state.shotAim = { home: null, away: null };
 }
 
 function inputDirection(input: InputState): { x: number; y: number } | null {
@@ -492,6 +494,34 @@ export function tickGame(
           if (p.kickCooldown < 0) p.kickCooldown = 0;
         }
 
+        // Human teams measure ball reach (control, retention, kick) from
+        // where the player stood at the start of the tick, like the bot
+        // engine (osma-liga/game/updateGame.ts activeDist); the challenge bot
+        // keeps measuring after its move.
+        const preMoveBallDist = dist(p.x, p.y, state.ball.x, state.ball.y);
+
+        // Aimed charged shot (human teams, shotAim.ts): starts on the kick
+        // press with the ball at the feet; while it runs the player keeps
+        // the direction held at the press (none = stands still) and ↑/↓
+        // steer the aim instead of moving. Kept through the release tick
+        // for the kick below, dropped once the ball leaves control radius.
+        const attackSign = team === 'home' ? 1 : -1;
+        let aim = state.shotAim[team];
+        if (aim && (!teamConfig.preparedTurns || aim.playerId !== p.id || preMoveBallDist >= BALL_CONTROL_RADIUS)) aim = null;
+        if (!aim && teamConfig.preparedTurns && input.kick && !state.kickWasDown[team]
+            && preMoveBallDist < KICK_RANGE && p.kickCooldown <= 0) {
+          aim = startShotAim(p.id, inputDirection(input), state.ball, attackSign);
+        }
+        state.shotAim[team] = aim;
+        const aimCharging = !!aim && input.kick;
+        if (aimCharging) steerShotAim(aim!, input.up, input.down, dt);
+        // Movement (and dribble control target) input: the direction kept
+        // from the press while aim-charging, the held keys otherwise.
+        const moveDir = aim?.moveDir ?? null;
+        const moveInput: InputState = aimCharging
+          ? { ...input, up: !!moveDir && moveDir.y < 0, down: !!moveDir && moveDir.y > 0, left: !!moveDir && moveDir.x < 0, right: !!moveDir && moveDir.x > 0 }
+          : input;
+
         // Ball physics V3 (human teams): own-kick self-trap protection +
         // prepared turns — see dribblePrep.ts.
         let selfTrapProtected = false;
@@ -506,21 +536,19 @@ export function tickGame(
           const opponents = state.players.filter((o) => o.team !== team && !removedIds.has(o.id) && o.matchStatus !== 'bench');
           // The ball carrier is a little slower (BALL_PHYSICS_V3.carrierSpeedFactor).
           speedCap = Math.min(carrierSpeedCap(p, state.ball, selfTrapProtected), updateDribblePrep(
-            state.dribblePrep[team], p, state.ball, opponents, inputDirection(input), input.kick, selfTrapProtected, dt,
+            state.dribblePrep[team], p, state.ball, opponents, inputDirection(moveInput), input.kick, selfTrapProtected, dt,
           ));
+          if (aimCharging) speedCap = Math.min(speedCap, p.stats.speed * SHOT_AIM.chargeSpeedFactor);
         }
 
-        // Human teams measure ball reach (control, retention, kick) from
-        // where the player stood at the start of the tick, like the bot
-        // engine (osma-liga/game/updateGame.ts activeDist); the challenge bot
-        // keeps measuring after its move.
-        const preMoveBallDist = dist(p.x, p.y, state.ball.x, state.ball.y);
-        movePlayerByInput(p, input, dt, speedCap);
+        movePlayerByInput(p, moveInput, dt, speedCap);
 
-        // Ball control: strong when player holds direction, gentle otherwise
+        // Ball control: strong when player holds direction, gentle otherwise.
+        // An aimed charge keeps the normal dribble control (the shot itself
+        // is added on the release tick, below).
         const prepHandled = teamConfig.preparedTurns && !input.kick && !selfTrapProtected
           && applyDribblePrepBallControl(state.dribblePrep[team], p, state.ball, dt);
-        if (!input.kick && !selfTrapProtected && !prepHandled) {
+        if ((!input.kick || aimCharging) && !selfTrapProtected && !prepHandled) {
           const bcDist = teamConfig.usesChargedKick ? preMoveBallDist : dist(p.x, p.y, state.ball.x, state.ball.y);
           // Human teams: the shared (bot-engine) radius; the challenge bot
           // keeps its own explicit AI_BALL_CONTROL_RADIUS.
@@ -528,13 +556,13 @@ export function tickGame(
           if (bcDist < controlRadius) {
             state.ball.vx *= BALL_CONTROL_DAMPING;
             state.ball.vy *= BALL_CONTROL_DAMPING;
-            const hasInput = input.left || input.right || input.up || input.down;
+            const hasInput = moveInput.left || moveInput.right || moveInput.up || moveInput.down;
             let tdx = 0, tdy = 0;
             if (hasInput) {
-              if (input.right) tdx += 1;
-              if (input.left) tdx -= 1;
-              if (input.down) tdy += 1;
-              if (input.up) tdy -= 1;
+              if (moveInput.right) tdx += 1;
+              if (moveInput.left) tdx -= 1;
+              if (moveInput.down) tdy += 1;
+              if (moveInput.up) tdy -= 1;
             } else {
               tdx = team === 'home' ? 1 : -1;
             }
@@ -588,7 +616,12 @@ export function tickGame(
           } else {
             if (state.kickWasDown[team] && p.kickCooldown <= 0) {
               if (preMoveBallDist < KICK_RANGE) {
-                const norm = computeKickDirection(input, team);
+                // Aimed shot at goal, else the held keys (no keys: human teams
+                // aim at the goal centre like the bot engine).
+                const aimDir = aim ? shotAimDir(aim, state.ball, attackSign) : null;
+                const norm = aimDir ?? (teamConfig.preparedTurns && !inputDirection(input)
+                  ? normalize(goalLineX(attackSign) - state.ball.x, FIELD_CY - state.ball.y)
+                  : computeKickDirection(input, team));
                 const chargeT = Math.min((state.kickHeldSeconds[team] * 1000) / KICK_MAX_CHARGE_MS, 1);
                 let forceMultiplier = KICK_TAP_FORCE_MULTIPLIER
                   + (KICK_MAX_CHARGE_FORCE_MULTIPLIER - KICK_TAP_FORCE_MULTIPLIER) * chargeT;
@@ -621,6 +654,7 @@ export function tickGame(
             }
             state.kickWasDown[team] = false;
             state.kickHeldSeconds[team] = 0;
+            state.shotAim[team] = null;
           }
         } else if (input.kick && p.kickCooldown <= 0) {
           const d = dist(p.x, p.y, state.ball.x, state.ball.y);

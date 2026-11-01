@@ -136,7 +136,8 @@ describe('goal attribution through the server engine', () => {
   it('E: a wide shot a defender happens to turn in counts for the shooter (ambiguous → no own goal)', () => {
     const r = run({
       me: { x: 640, y: 355 }, ball: { x: 666, y: 355 }, pinned: [AWAY_GK_ASIDE, { who: 'away:f:0', x: 780, y: 367 }],
-      inputs: [{ dur: 0.3, right: true, kick: true }, { dur: 0.05, right: true }, { dur: 3 }],
+      // Aimed wide: ↓ during the charge moves the aim below the post.
+      inputs: [{ dur: 0.05, right: true, kick: true }, { dur: 0.45, down: true, kick: true }, { dur: 0.05, right: true }, { dur: 3 }],
     });
     expect(r.opponentTouches.has('field')).toBe(true);
     expect([r.scoring, r.own]).toEqual(['home', false]);
