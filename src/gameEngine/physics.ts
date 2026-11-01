@@ -2,7 +2,7 @@ import { OnlinePlayer, OnlineBall, Vec2 } from './types.js';
 import {
   FIELD_L, FIELD_R, FIELD_T, FIELD_B,
   GOAL_T, GOAL_B, GOAL_DEPTH,
-  PLAYER_RADIUS, BALL_RADIUS,
+  PLAYER_RADIUS, BALL_RADIUS, GOALKEEPER_RADIUS,
   BUMP_FORCE, BALL_MAX_SPEED, BALL_WALL_RESTITUTION, KICK_SNAP_CLEARANCE,
   TEAMMATE_SEPARATION_RADIUS, TEAMMATE_SEPARATION_STRENGTH,
   TEAMMATE_BALL_RECEIVE_MAX_SPEED, TEAMMATE_BALL_RECEIVE_EXTRA_RADIUS,
@@ -83,7 +83,7 @@ export function resolvePlayerBallCollisions(players: OnlinePlayer[], ball: Onlin
 
   for (const p of players) {
     const d = dist(p.x, p.y, ball.x, ball.y);
-    const minDist = PLAYER_RADIUS + BALL_RADIUS;
+    const minDist = (p.role === 'goalkeeper' ? GOALKEEPER_RADIUS : PLAYER_RADIUS) + BALL_RADIUS;
     if (d < minDist && d > 0) {
       const nx = (ball.x - p.x) / d;
       const ny = (ball.y - p.y) / d;
@@ -128,13 +128,13 @@ function bounceBallOffPlayer(ball: OnlineBall, p: OnlinePlayer, nx: number, ny: 
 // either left it again or got past the point closest to his centre, the
 // ball is put back at the entry point (1 px outside, like the client) and
 // bounces off there exactly like a normal contact (same hitbox
-// PLAYER_RADIUS + BALL_RADIUS, same damping and bump). A ball that only
+// GOALKEEPER_RADIUS + BALL_RADIUS, same damping and bump). A ball that only
 // reaches into him and stays in front is left to the overlap resolution as
 // before. Mirrors osma-liga/game/physics.ts. Returns the goalkeeper's id.
 export function sweepBallAgainstGoalkeepers(
   goalkeepers: OnlinePlayer[], ball: OnlineBall, fromX: number, fromY: number,
 ): string | null {
-  const r = PLAYER_RADIUS + BALL_RADIUS;
+  const r = GOALKEEPER_RADIUS + BALL_RADIUS;
   const dx = ball.x - fromX;
   const dy = ball.y - fromY;
   const a = dx * dx + dy * dy;

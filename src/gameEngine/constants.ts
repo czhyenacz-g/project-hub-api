@@ -131,7 +131,9 @@ export const TEAMMATE_BALL_RECEIVE_LOCK_MS = 1200;
 // the same numbers apply 1:1).
 export const GOALKEEPER_ZONE_DEPTH = 130;
 export const GOALKEEPER_ZONE_HEIGHT = (GOAL_B - GOAL_T) + 70;
-export const GOALKEEPER_SPEED = 150;
+// 2026-11-01: 20 % slower (150 → 120) and 20 % smaller body (ball hitbox).
+export const GOALKEEPER_SPEED = 120;
+export const GOALKEEPER_RADIUS = PLAYER_RADIUS * 0.8;
 export const GOALKEEPER_DEFAULT_DEPTH = 34;
 export const GOALKEEPER_REACT_RANGE = GOALKEEPER_ZONE_DEPTH + 260;
 export const GOALKEEPER_BALL_DAMPING = 0.18;

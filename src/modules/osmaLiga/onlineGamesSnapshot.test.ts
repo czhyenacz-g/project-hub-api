@@ -61,7 +61,8 @@ describe('buildSnapshot — player payload', () => {
     }
     const gkPayload = snapshot.players.find((p) => p.isGoalkeeper)!;
     const fieldPayload = snapshot.players.find((p) => !p.isGoalkeeper)!;
-    expect(gkPayload.size).toBeGreaterThan(fieldPayload.size);
+    // Goalkeeper 20 % smaller since 2026-11-01 (1.15 × 0.8 of a field player).
+    expect(gkPayload.size).toBeCloseTo(fieldPayload.size * 1.15 * 0.8, 6);
   });
 
   it('does not leak server-only physics stats (speed/shotPower/stoppingPower)', () => {

@@ -5,7 +5,7 @@ import { sweepBallAgainstGoalkeepers } from './physics.js';
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG } from './temporaryRemoval.js';
 import { DEFAULT_BEHAVIOR_CONFIG, TRAINING_CHALLENGE_BEHAVIOR_CONFIG } from './teamBehavior.js';
 import { computeTrainingChallengeInput } from './ai.js';
-import { PLAYER_RADIUS, BALL_RADIUS, GOALKEEPER_BALL_DAMPING, GOALKEEPER_BUMP_FORCE } from './constants.js';
+import { GOALKEEPER_RADIUS, BALL_RADIUS, GOALKEEPER_BALL_DAMPING, GOALKEEPER_BUMP_FORCE } from './constants.js';
 import type { InputState, OnlineGameState, OnlinePlayer, Vec2 } from './types.js';
 
 // Goalkeeper contact: the ball must never cross a goalkeeper's body without
@@ -15,7 +15,7 @@ import type { InputState, OnlineGameState, OnlinePlayer, Vec2 } from './types.js
 
 const NO_REMOVALS = { ...DEFAULT_TEMPORARY_REMOVAL_CONFIG, enabled: false };
 const DT = 0.033;
-const R = PLAYER_RADIUS + BALL_RADIUS;
+const R = GOALKEEPER_RADIUS + BALL_RADIUS; // 24.4 since the smaller goalkeeper (2026-11-01)
 const idle = (): InputState => ({ up: false, down: false, left: false, right: false, kick: false, switchPlayer: false });
 
 beforeEach(() => {
@@ -114,7 +114,7 @@ describe('shots straight at a ready goalkeeper are stopped by his body', () => {
 });
 
 describe('the ball never passes through his body, whatever happens after contact', () => {
-  for (const off of [0, 8, 16, 22, 26]) for (const speed of [500, 800]) {
+  for (const off of [0, 8, 16, 20, 22]) for (const speed of [500, 800]) {
     for (const [side, shot] of bothSides({ side: 'right', ball: { x: GK.x - 60, y: GK.y + off }, vel: { x: speed, y: 0 }, gk: GK })) {
       it(`${speed} px/s, ${off} px off centre, ${side}`, () => {
         const r = shoot(shot);

@@ -731,7 +731,11 @@ export function tickGame(
   const onPitch = state.players.filter((p) => !removedIds.has(p.id) && p.matchStatus !== 'bench');
   const goalkeepers = onPitch.filter((p) => p.role === 'goalkeeper');
   const sweptId = sweepBallAgainstGoalkeepers(goalkeepers, state.ball, ballFromX, ballFromY);
-  const touchedId = resolvePlayerBallCollisions(onPitch, state.ball) ?? sweptId;
+  // A field player's body push can also squeeze the ball across the
+  // (smaller, 2026-11-01) goalkeeper — sweep that push too.
+  const pushFromX = state.ball.x, pushFromY = state.ball.y;
+  const pushedId = resolvePlayerBallCollisions(onPitch, state.ball);
+  const touchedId = sweepBallAgainstGoalkeepers(goalkeepers, state.ball, pushFromX, pushFromY) ?? pushedId ?? sweptId;
   recordTouch(state, touchedId);
 
   // 7b. Teammate ball receive — a slow/catchable ball contact on a

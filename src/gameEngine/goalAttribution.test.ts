@@ -114,7 +114,7 @@ describe('goal attribution through the server engine', () => {
   });
 
   it('C: a light goalkeeper touch is not an own goal', () => {
-    const r = run({ me: { x: 700, y: 280 }, ball: { x: 726, y: 280 }, pinned: [{ who: 'away:gk', x: 868, y: 310 }], inputs: TAP });
+    const r = run({ me: { x: 700, y: 280 }, ball: { x: 726, y: 280 }, pinned: [{ who: 'away:gk', x: 868, y: 304 }], inputs: TAP });
     expect(r.opponentTouches.has('gk')).toBe(true);
     expect([r.scoring, r.own]).toEqual(['home', false]);
     expect(r.state.score).toEqual({ home: 1, away: 0 });

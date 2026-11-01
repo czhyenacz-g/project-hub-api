@@ -47,6 +47,7 @@ export const DEFAULT_GOALKEEPER_STATS: PlayerStats = {
   speed: GOALKEEPER_SPEED,
   shotPower: 1,
   stoppingPower: 1,
-  // Reproduces the pre-refactor goalkeeper visual bump (PLAYER_RADIUS * 1.15).
-  size: PLAYER_RADIUS * 1.15,
+  // Pre-refactor goalkeeper visual bump (PLAYER_RADIUS * 1.15), 20 % smaller
+  // since 2026-11-01 together with the ball hitbox (GOALKEEPER_RADIUS).
+  size: PLAYER_RADIUS * 1.15 * 0.8,
 };

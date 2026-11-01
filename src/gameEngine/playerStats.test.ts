@@ -44,7 +44,8 @@ describe('PlayerStats — data model', () => {
     const gk = state.players.find((p) => p.role === 'goalkeeper')!;
     expect(gk.stats).toEqual(DEFAULT_GOALKEEPER_STATS);
     expect(gk.stats.stoppingPower).toBeGreaterThan(DEFAULT_FIELD_PLAYER_STATS.stoppingPower);
-    expect(gk.stats.size).toBeGreaterThan(DEFAULT_FIELD_PLAYER_STATS.size);
+    // 20 % smaller since 2026-11-01 (now below a field player's size).
+    expect(gk.stats.size).toBeCloseTo(PLAYER_RADIUS * 1.15 * 0.8, 6);
   });
 
   it('each player owns an independent stats object', () => {
@@ -163,11 +164,11 @@ describe('PlayerStats — stoppingPower drives ball-collision damping', () => {
 });
 
 describe('PlayerStats — size is visual only', () => {
-  it('goalkeeper stats.size is larger than PLAYER_RADIUS; field player equals it', () => {
+  it('goalkeeper stats.size is 20 % below the old 1.15× bump; field player equals PLAYER_RADIUS', () => {
     const state = createInitialState();
     const gk = state.players.find((p) => p.role === 'goalkeeper')!;
     const fieldPlayer = state.players.find((p) => p.role === 'field_player')!;
-    expect(gk.stats.size).toBeGreaterThan(PLAYER_RADIUS);
+    expect(gk.stats.size).toBeCloseTo(PLAYER_RADIUS * 1.15 * 0.8, 6);
     expect(fieldPlayer.stats.size).toBe(PLAYER_RADIUS);
   });
 });
