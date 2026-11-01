@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createInitialState } from './createInitialState.js';
 import { tickGame } from './tick.js';
 import { DEFAULT_TEMPORARY_REMOVAL_CONFIG } from './temporaryRemoval.js';
-import { FIELD_T, FIELD_B, PLAYER_RADIUS } from './constants.js';
+import { FIELD_T, FIELD_B, PLAYER_RADIUS, PLAYER_SPEED, BALL_PHYSICS_V3 } from './constants.js';
 import {
   DEFAULT_BEHAVIOR_CONFIG, TRAINING_CHALLENGE_BEHAVIOR_CONFIG, GameBehaviorConfig,
 } from './teamBehavior.js';
@@ -83,9 +83,26 @@ describe('server ball physics V3 (prepared turns)', () => {
     expect(r.prep).toBeGreaterThan(0);
     expect(r.lost).toBe(0);
 
+    // Turning INTO a defender: the assist may start while it is still
+    // outside noOpponentRadius, but the duel is still lost.
     const behind = { x: 250 + 110, y: 280 + 38 };
     const b = solo(behind);
-    expect(turn(b.state, b.meId, { left: true }, DEFAULT_BEHAVIOR_CONFIG, 0.6, behind).prep).toBe(0);
+    expect(turn(b.state, b.meId, { left: true }, DEFAULT_BEHAVIOR_CONFIG, 0.6, behind).lost).toBeGreaterThan(0.5);
+  });
+
+  it('the ball carrier runs carrierSpeedFactor slower, without the ball at full speed', () => {
+    const run = (withBall: boolean) => {
+      const { state, meId } = solo();
+      if (!withBall) { state.ball.x = 800; state.ball.y = 100; }
+      const me = state.players.find((p) => p.id === meId)!;
+      state.inputs.home = { ...idle(), right: true };
+      for (let i = 0; i < 30; i++) tickGame(state, DT, DEFAULT_BEHAVIOR_CONFIG, NO_REMOVALS);
+      return { dx: me.x - 250, ballDist: Math.hypot(state.ball.x - me.x, state.ball.y - me.y) };
+    };
+    const carry = run(true), free = run(false);
+    expect(carry.ballDist).toBeLessThan(57);
+    expect(free.dx).toBeCloseTo(PLAYER_SPEED, -1);
+    expect(carry.dx / free.dx).toBeCloseTo(BALL_PHYSICS_V3.carrierSpeedFactor, 1);
   });
 
   it('the controlled player reaches the touchline but never crosses it', () => {

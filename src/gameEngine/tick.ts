@@ -8,13 +8,13 @@ import {
   MANUAL_SWITCH_LOCK_DURATION, GOAL_PAUSE_DURATION, BALL_RADIUS,
   BALL_CONTROL_RADIUS, AI_BALL_CONTROL_RADIUS, BALL_CONTROL_DAMPING, BALL_CONTROL_FORCE, BALL_CONTROL_INPUT_FORCE, BALL_CONTROL_OFFSET,
   BALL_RETENTION_RADIUS, BALL_RETENTION_NO_OPPONENT_RADIUS, BALL_RETENTION_MAX_BALL_SPEED,
-  BALL_RETENTION_STRENGTH, BALL_STOP_DAMPING,
+  BALL_RETENTION_STRENGTH, BALL_STOP_DAMPING, BALL_PHYSICS_V3,
   KICK_CONTACT_RANGE, KICK_CONTACT_BALL_NUDGE, KICK_CONTACT_FORCE_MULTIPLIER,
   CORNER_ZONE_MARGIN, CORNER_CLEAR_DELAY, CORNER_CLEAR_SPEED,
   CORNER_CLEAR_REPOSITION, CORNER_CLEAR_COOLDOWN,
   TEAMMATE_BALL_RECEIVE_LOCK_MS, KICK_SELF_TRAP_PROTECTION_SECONDS, PLAYER_RADIUS,
 } from './constants.js';
-import { updateDribblePrep, applyDribblePrepBallControl } from './dribblePrep.js';
+import { updateDribblePrep, applyDribblePrepBallControl, carrierSpeedCap } from './dribblePrep.js';
 import { isOwnGoal as isOwnGoalKick } from './goalAttribution.js';
 import {
   dist, normalize, clamp,
@@ -504,9 +504,10 @@ export function tickGame(
           }
           selfTrapProtected = trap.remaining > 0 && trap.playerId === p.id;
           const opponents = state.players.filter((o) => o.team !== team && !removedIds.has(o.id) && o.matchStatus !== 'bench');
-          speedCap = updateDribblePrep(
+          // The ball carrier is a little slower (BALL_PHYSICS_V3.carrierSpeedFactor).
+          speedCap = Math.min(carrierSpeedCap(p, state.ball, selfTrapProtected), updateDribblePrep(
             state.dribblePrep[team], p, state.ball, opponents, inputDirection(input), input.kick, selfTrapProtected, dt,
-          );
+          ));
         }
 
         // Human teams measure ball reach (control, retention, kick) from
@@ -560,7 +561,10 @@ export function tickGame(
               const ballSpeed = Math.hypot(state.ball.vx, state.ball.vy);
               if (bcDist < BALL_RETENTION_RADIUS && ballSpeed < BALL_RETENTION_MAX_BALL_SPEED) {
                 const oppDist = nearestOpponentDistance(state, state.ball.x, state.ball.y, team, removedIds);
-                if (oppDist > BALL_RETENTION_NO_OPPONENT_RADIUS) {
+                const noOpponentRadius = teamConfig.preparedTurns
+                  ? BALL_PHYSICS_V3.retentionNoOpponentRadius
+                  : BALL_RETENTION_NO_OPPONENT_RADIUS;
+                if (oppDist > noOpponentRadius) {
                   state.ball.vx += (p.vx - state.ball.vx) * BALL_RETENTION_STRENGTH;
                   state.ball.vy += (p.vy - state.ball.vy) * BALL_RETENTION_STRENGTH;
                   if (!hasInput) {

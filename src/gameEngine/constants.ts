@@ -159,7 +159,14 @@ export const BALL_PHYSICS_V3 = {
   dribbleControlRadius: 57,
   dribbleMaxRelativeSpeed: 160,
   dribbleMinControlSeconds: 0.12,
-  noOpponentRadius: 70,
+  // 40 = just past body contact (PLAYER_RADIUS + BALL_RADIUS = 28).
+  noOpponentRadius: 40,
+  // Retention for human teams stays on until an opponent is this close to
+  // the ball (replaces BALL_RETENTION_NO_OPPONENT_RADIUS for preparedTurns).
+  retentionNoOpponentRadius: 40,
+  // The player carrying the ball (close, moving with it) runs at this
+  // fraction of stats.speed; not right after its own shot.
+  carrierSpeedFactor: 0.9,
   shieldTurnMinAngleDeg: 120,
   shieldContactRadius: 36,
   turnMinAngleDeg: 60,

@@ -64,6 +64,18 @@ function chooseSide(player: Vec2, rel: Vec2, dir: Vec2, opponents: Vec2[]): numb
   return plus > minus ? 1 : -1;
 }
 
+// Speed cap for the player carrying the ball: ball close and moving with
+// it (same test as a settled dribble), not just shot. Runs before the
+// active player moves, like updateDribblePrep. Infinity = no cap.
+export function carrierSpeedCap(active: OnlinePlayer, ball: OnlineBall, selfTrapProtected: boolean): number {
+  if (selfTrapProtected) return Infinity;
+  const d = Math.hypot(ball.x - active.x, ball.y - active.y);
+  const relSpeed = Math.hypot(ball.vx - active.vx, ball.vy - active.vy);
+  return d < C.dribbleControlRadius && relSpeed < C.dribbleMaxRelativeSpeed
+    ? active.stats.speed * C.carrierSpeedFactor
+    : Infinity;
+}
+
 // Runs before the active player moves; `active.vx/vy` still hold last
 // tick's velocity. `opponents` = positions of the other team's players
 // that are on the pitch. Returns the speed cap for this tick (Infinity =
